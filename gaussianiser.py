@@ -18,6 +18,10 @@ def main():
     parser.add_argument("-n", "--noimages", action="store_true", help="Do not show images, useful for batch processing")
     args = parser.parse_args()
 
+    if not os.path.exists(args.filename):
+        print(f"File {args.filename} not found.")
+        return
+
     from preprocessing import load_reviews, preprocess_and_extract_topics
     from embeddings import initialise, clustering_topics, process_topic_extraction
     from sentiments import (
