@@ -18,13 +18,6 @@ def initialise(topic_general: str, embeddings_cache_file: str):
     global _EMBEDDINGS_CACHE_FILE, overallTopicEmbedding, topic_embeddings_global, genAI_Client
     _EMBEDDINGS_CACHE_FILE = embeddings_cache_file
 
-    print("Connecting to Mistral AI...")
-    # Initialize the Mistral client (import moved here)
-    from mistralai import Mistral
-    from key import MistraAIKey as api_key
-    genAI_Client = Mistral(api_key=api_key)
-    print("Ready\n")
-
 def extract_and_cache_embeddings(preprocessed_reviews: list[str], emb_model):
     global topic_embeddings_global, _EMBEDDINGS_CACHE_FILE
     extracted = []
