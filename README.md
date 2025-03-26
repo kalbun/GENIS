@@ -25,14 +25,14 @@ review text in addition to initial score. To do so, gaussianiser:
     
 # RUN GAUSSIANISER
 
-* Creating the environment
+## Create the environment
 
 To run gaussianiser, create a new python environment and install there the
 python interpreter version 3.12.
 For example, with miniconda, execute:
 
-  conda create -n myenv
-  conda activate myenv
+    conda create -n myenv
+    conda activate myenv
 
 Once python is installed, invoke pip to install the requirements:
 
@@ -40,17 +40,17 @@ Once python is installed, invoke pip to install the requirements:
 
 The operation may take several minutes, but it should run with no problems.
 
-* Key file
+## Create key file
 
 gaussianiser needs access to Mistral APIs. To do so, you must create a text
 file name key.py and write your API key in this format:
 
-  MistraAIKey: str = '<your key>'
+    MistraAIKey: str = <your key>
 
 You can use different LLMs, but in this case you will need to manually modify
 the code in sentiments.py.
 
-* Run parameters
+## Run parameters
 
 Gaussianiser has several parameters that influence how it works.
 To get acquainted with them, you can add the -h or --help switch and
@@ -59,7 +59,7 @@ read the resulting message.
 filename
   the only mandatory parameter, defines a Jsonl file containing the
   reviews to analyse.
-
+  
 -s SEED
   Allows to set the seed for the random generator. The default is 1967.
   Using a fixed seed allows to get repeatable results.
@@ -80,7 +80,7 @@ filename
   in case you only need the result files, or when you set RUNS to a high
   values and want to make the process automatic.
 
-* Where to find reviews?
+## Where to find reviews?
 
   There are many public repositories with Amazon review, but one of the best
   can be found here:
@@ -95,7 +95,7 @@ filename
   You can also use different sources, provided the file is in jsonl format
   and contain, as a minimum, the review text and the score in stars (1-5).
 
-* First run and automatic download
+## First run and automatic downloads
 
 nltk and sentence_transformer libraries need additional packets to work.
 During the first run, they will connect to the internet and automatically
@@ -107,29 +107,29 @@ Gaussianiser saves a number of files while running and put them in different
 directories to help keeping data in order.
 
 First, the name of the review file is used to create a subdirectory for storing
-all the related data. For example, if the file is <magazines.jsonl>, then
-gaussianiser will create a subdirectory <magazines>.
+all the related data. For example, if the file is **magazines.jsonl**, then
+gaussianiser will create a subdirectory **magazines**.
 
 While running, gaussianiser stores two files in this subdir:
 - cache of embeddings in pickle format (very efficient with number sequences)
 - the original and adjusted scores in csv format
 
-Their filenames contain the review filename, so for <magazine> they will be
+Their filenames contain the review filename, so for **magazines** they will be
 
-  <magazine>_embeddings_cache.pkl
+  **magazines**_embeddings_cache.pkl
 
 and
 
-  <magazine>_results.csv
+  **magazines**_results.csv
 
 Gaussianiser also creates a sub-subdirectory named after the seed value, and
 stores there the cache of llm-based sentiment analysis, like in:
 
-  <magazine>_sentiments_cache.jsonl
+  **magazines**_sentiments_cache.jsonl
 
 We recommend not to modify these files.
 
-# THE RESULT FILE
+## The results csv file
 
 This file contains the original and reranked scores, along with other details.
 The first row contains the data header and should be rather self-explanantory.
