@@ -33,6 +33,7 @@ For example, with miniconda, execute:
 
     conda create -n myenv
     conda activate myenv
+    conda install python=3.12
 
 Once python is installed, invoke pip to install the requirements:
 
