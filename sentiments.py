@@ -9,21 +9,47 @@ from key import MistraAIKey as api_key
 warnings.filterwarnings("ignore")
 
 # Global sentiment cache is maintained per file
-sentimentCache: dict = {}
+sentimentCache: dict
 sentimentCacheFile: str = ""
+sentimentCacheBypass: bool = False
+
+# Using a semaphore for thread-safe access
+sentimentCacheSemaphore = threading.Semaphore(1)
+
+# Using a semaphore for thread-safe access to the LLM
+# Limiting the number of concurrent requests to 6, because
+# Mistral has a limit of 6 concurrent requests per API key
+llmSemaphore = threading.Semaphore(6)
 
 # Initialize the Mistral client
 genAI_Client = Mistral(api_key=api_key)
 
-# Global sentiment cache is maintained per file
-def sentimentCache_Load(cache_file: str) -> dict:
+def sentimentCacheInit(cache_file: str, bypass_cache: bool = False):
+    """
+    Initialize and load the sentiment cache variables. If bypass_cache is set
+    to True, the cache remains empty and is not saved, but can still be used
+    for storing sentiments.
 
-    global sentimentCache
-    global sentimentCacheFile
+    :param cache_file: the path to the cache file
+    :param bypass_cache: whether to bypass the cache loading
+    """
+    global sentimentCache, sentimentCacheFile, sentimentCacheBypass
 
     sentimentCacheFile = cache_file
+    sentimentCacheBypass = bypass_cache
     sentimentCache = {}
-    if os.path.exists(sentimentCacheFile):
+    sentimentCacheLoad()
+
+# Global sentiment cache is maintained per file
+def sentimentCacheLoad() -> dict:
+    """
+    Load the sentiment cache from the file if it exists and bypass is not set.
+    
+    :return: the sentiment cache as a dictionary
+    """
+    global sentimentCache, sentimentCacheFile, sentimentCacheBypass
+
+    if (not sentimentCacheBypass) and os.path.exists(sentimentCacheFile):
         try:
             with open(sentimentCacheFile, "rt", encoding="utf-8") as f:
                 sentimentCache = json.load(f)
@@ -31,29 +57,49 @@ def sentimentCache_Load(cache_file: str) -> dict:
             pass
     return sentimentCache
 
-# Using a semaphore for thread-safe access
-cacheSemaphore = threading.Semaphore(1)
 
-def sentimentCache_Save(cache: dict):
-    if (cacheSemaphore.acquire()):
-        try:
-            with open(sentimentCacheFile, "wt", encoding="utf-8") as f:
-                json.dump(cache, f, ensure_ascii=False, indent=4)
-        except Exception:
-            pass
-        cacheSemaphore.release()
+def sentimentCache_Save():
+    """
+    Save the sentiment cache to the file if bypass is not set.
+    """
+    global sentimentCache, sentimentCacheFile, sentimentCacheBypass
 
-llmSemaphore = threading.Semaphore(6)
+    if (not sentimentCacheBypass) and os.path.exists(sentimentCacheFile):
+        if (sentimentCacheSemaphore.acquire()):
+            try:
+                with open(sentimentCacheFile, "wt", encoding="utf-8") as f:
+                    json.dump(sentimentCache, f, ensure_ascii=False, indent=4)
+            except Exception:
+                pass
+            sentimentCacheSemaphore.release()
 
-def sentimentCache_CreateItem(cache: dict, item: str, topic_sentiments: dict):
-    if cacheSemaphore.acquire():
-        cache[item] = {'sentiments': topic_sentiments}
-        cacheSemaphore.release()
 
-def sentimentCache_updateOriginalRating(cache: dict, item: str, originalRating: float, newRating: float):
-    if cacheSemaphore.acquire():
-        cache[item][str(originalRating)] = newRating
-        cacheSemaphore.release()
+def sentimentCache_CreateItem(item: str, topic_sentiments: dict):
+    """
+    Create a new item in the sentiment cache with the given topic sentiments.
+    
+    :param item: the item to create in the cache
+    :param topic_sentiments: the topic sentiments to associate with the item
+    """
+    global sentimentCache, sentimentCacheSemaphore
+
+    if sentimentCacheSemaphore.acquire():
+        sentimentCache[item] = {'sentiments': topic_sentiments}
+        sentimentCacheSemaphore.release()
+
+def sentimentCache_updateOriginalRating(item: str, originalRating: float, newRating: float):
+    """
+    Update the original rating in the sentiment cache for the given item.
+
+    :param item: the item to update in the cache
+    :param originalRating: the original rating to update
+    :param newRating: the new rating to set in the cache
+    """
+    global sentimentCache, sentimentCacheSemaphore
+
+    if sentimentCacheSemaphore.acquire():
+        sentimentCache[item][str(originalRating)] = newRating
+        sentimentCacheSemaphore.release()
 
 def adjust_rating(original_score, topic_sentiments):
     numeric_values = [v for v in topic_sentiments.values() if isinstance(v, (int, float))]
@@ -141,17 +187,17 @@ def sentimentCache_getSentiment_and_AdjustedRating(text: str, original_rating: f
             topic_sentiments = cached_data['sentiments']
         else:
             topic_sentiments = parseReviewSentimentLLM(text, topics)
-            sentimentCache_CreateItem(sentimentCache, text, topic_sentiments)
-            sentimentCache_Save(sentimentCache)
+            sentimentCache_CreateItem(text, topic_sentiments)
+            sentimentCache_Save()
             # You would save cache here if needed
         if str(original_rating) in cached_data:
             print("C", end="", flush=True)
             return topic_sentiments, cached_data[str(original_rating)]
         else:
             adjusted_rating = adjust_rating(original_rating, topic_sentiments)
-            sentimentCache_updateOriginalRating(sentimentCache, text, original_rating, adjusted_rating)
-            sentimentCache_Save(sentimentCache)
+            sentimentCache_updateOriginalRating(text, original_rating, adjusted_rating)
+            sentimentCache_Save()
     else:
-        sentimentCache_CreateItem(sentimentCache, text, {})
+        sentimentCache_CreateItem(text, {})
         topic_sentiments, adjusted_rating = sentimentCache_getSentiment_and_AdjustedRating(text, original_rating, topics)
     return topic_sentiments, adjusted_rating
