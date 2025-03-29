@@ -1,3 +1,9 @@
+Valid up to version 0.4.0
+
+# CHANGELOG
+
+0.4.0: added new run parameters
+
 # OVERALL IDEA
 
 gaussianiser was written to verify if the text associated to Amazon reviews
@@ -96,6 +102,24 @@ filename
   You can prevent the chart generation with this flag. It could be useful
   in case you only need the result files, or when you set RUNS to a high
   values and want to make the process automatic.
+
+-hc --hcluster
+  Allows to modify the minimum cluster size used in HDBSCAN. Default 3.
+
+-hs --hsize
+  Allows to modify the minimum sample used in HDBSCAN. Default 2.
+
+-t --threshold
+  Allows to modify the relevance threshold for embeddings. A word is
+  classified as relevant if the semantic similarity is at least this value.
+  Default 0.25.
+
+-b --bypass
+  Bypasses embeddings and sentiment caches. This is useful to run analysis
+  that changes the relevance threshold or HDBSCAN parameters.
+
+-e --earlystop
+  Stop after printing cluster table. Do not execute LLM sentiment analysis.
 
 ## Where to find reviews?
 

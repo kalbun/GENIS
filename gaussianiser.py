@@ -17,9 +17,9 @@ from sentiments import (
 )
 
 def main():
-    ver = "0.3.0"
-
-    parser = argparse.ArgumentParser(description=f"Amazon Cluster Analysis v{ver}")
+    ver = "0.4.0"
+    print(f"Amazon Cluster Analysis v{ver}")
+    parser = argparse.ArgumentParser()
     parser.add_argument("filename", type=str, help="Jsonl file to process including extension")
     parser.add_argument("-s", "--seed", type=int, help="Random seed (default 1967)", default=1967)
     parser.add_argument("-m", "--max-reviews", type=int, help="Reviews to process (default 1000)", default=1000)
