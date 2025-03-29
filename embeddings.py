@@ -12,15 +12,23 @@ warnings.simplefilter(action='ignore')
 # Global variables for embeddings and the overall topic
 topic_embeddings_global = {}
 overallTopicEmbedding = None
+# variable to prevent embedding caching
+preventEmbeddingCaching: bool = False
+# Global variable for the embeddings cache file path
 _EMBEDDINGS_CACHE_FILE = ""
 
-def initialise(topic_general: str, embeddings_cache_file: str):
-    global _EMBEDDINGS_CACHE_FILE, overallTopicEmbedding, topic_embeddings_global, genAI_Client
+def EmbeddingsCacheInit(embeddings_cache_file: str, prevent_cache: bool = False):
+    global _EMBEDDINGS_CACHE_FILE, topic_embeddings_global
+    global overallTopicEmbedding, preventEmbeddingCaching
     _EMBEDDINGS_CACHE_FILE = embeddings_cache_file
+    preventEmbeddingCaching = prevent_cache
 
 def extract_and_cache_embeddings(preprocessed_reviews: list[str], emb_model):
-    global topic_embeddings_global, _EMBEDDINGS_CACHE_FILE
-    extracted = []
+
+    global topic_embeddings_global
+    extracted: list[str] = []
+    new_count: int
+
     print("Extracting topics...", end="", flush=True)
     for review in preprocessed_reviews:
         extracted.extend(review.split())
@@ -40,15 +48,18 @@ def extract_and_cache_embeddings(preprocessed_reviews: list[str], emb_model):
     embeddingCache_save()
 
 def embeddingCache_load():
-    global _EMBEDDINGS_CACHE_FILE, topic_embeddings_global
-    if os.path.exists(_EMBEDDINGS_CACHE_FILE):
+    global _EMBEDDINGS_CACHE_FILE, topic_embeddings_global, preventEmbeddingCaching
+    # Load the embeddings from the cache file unless preventEmbeddingCaching is set to True
+    if (not preventEmbeddingCaching) and os.path.exists(_EMBEDDINGS_CACHE_FILE):
         with open(_EMBEDDINGS_CACHE_FILE, "rb") as f:
             topic_embeddings_global = pickle.load(f)
 
 def embeddingCache_save():
-    global _EMBEDDINGS_CACHE_FILE, topic_embeddings_global
-    with open(_EMBEDDINGS_CACHE_FILE, "wb") as f:
-        pickle.dump(topic_embeddings_global, f)
+    global _EMBEDDINGS_CACHE_FILE, topic_embeddings_global, preventEmbeddingCaching
+    # Save the embeddings to the cache file unless preventEmbeddingCaching is set to True
+    if (not preventEmbeddingCaching) and os.path.exists(_EMBEDDINGS_CACHE_FILE):
+        with open(_EMBEDDINGS_CACHE_FILE, "wb") as f:
+            pickle.dump(topic_embeddings_global, f)
 
 def is_relevant_topic(topic: str, threshold: float = 0.25) -> bool:
     global overallTopicEmbedding, topic_embeddings_global
@@ -64,12 +75,31 @@ def apply_pca_to_embeddings(embeddings, n_components: float) -> tuple[np.array, 
     pca = PCA(n_components=n_components)
     return pca.fit_transform(embeddings), pca
 
-def clustering_topics(preprocessed_reviews: list[str]) -> list[tuple]:
+def clustering_topics(
+        reviews: list[str],
+        relevance_threshold: float = 0.25,
+        cluster_size: int = 3,
+        min_samples: int = 2,
+    ) -> list[tuple]:
+    """
+    Clusters the topics based on their embeddings and returns the most important clusters.
+    
+    Args:
+        reviews: List of reviews.
+        relevance_threshold: minimum semantic similarity for topics to be considered relevant.
+        cluster_size: minimum size of clusters for HDBSCAN.
+        min_samples: minimum number of samples in a cluster for HDBSCAN.
+    Returns:
+        list[tuple]: List of tuples containing cluster information.
+    """
     global topic_embeddings_global, overallTopicEmbedding
     print("Creating relevant clusters...", end="", flush=True)
     relevant_topics = []
-    for i, review in enumerate(preprocessed_reviews):
-        relevant_topics.extend([t for t in review.split() if is_relevant_topic(t)])
+    for i, review in enumerate(reviews):
+        # Create a list of relevant words from each review. To decide if a word is relevant,
+        # we check its semiamntic similarity with the overall topic embedding.
+        # Note that is_relevant_topic() also updates the global topic_embeddings_global dictionary.
+        relevant_topics.extend([t for t in review.split() if is_relevant_topic(t,relevance_threshold)])
         if i and i % 1000 == 0:
             print(".", end="", flush=True)
     print(" done.")
@@ -80,7 +110,7 @@ def clustering_topics(preprocessed_reviews: list[str]) -> list[tuple]:
     embeddings_array = np.array(embeddings)
 
     reduced_vectors, pca = apply_pca_to_embeddings(embeddings_array, n_components=0.90)
-    clusterer = hdbscan.HDBSCAN(min_cluster_size=3, min_samples=2)
+    clusterer = hdbscan.HDBSCAN(min_cluster_size=cluster_size, min_samples=min_samples, metric='euclidean')
     labels = clusterer.fit_predict(reduced_vectors)
     
     centroids = {label: np.mean(reduced_vectors[labels == label], axis=0) for label in set(labels) if label != -1}
