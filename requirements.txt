@@ -4,4 +4,4 @@ scipy
 scikit-learn
 mistralai
 sentence_transformers
-nlkt
+nltk

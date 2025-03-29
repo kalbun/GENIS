@@ -18,10 +18,26 @@ review text in addition to initial score. To do so, gaussianiser:
 - preprocess reviews with nltk tokenizer, keeping only nouns and adjectives
 - use embeddings to preserve only words semantically near enough to the
   review overall topic
-- clusterise selected words with hdbscan
+- clusterises selected words with hdbscan
 - stores words belonging to each cluster
+- assigns each review to one and only one cluster
 - invoke an llm passing the review and cluster words, asking to evaluate
-  the sentiment for each of them. For example, if cluster contains
+  the sentiment for each of them. The prompt instructs the llm to assign
+  a numerical score from -1 to +1 with a resolution of 0.5.
+  For example, if cluster contains _reader_, _reading_ and _readership_
+  while the review is _I read this book with great pleasure_, then the
+  llm may return a score of 0.5 or 1.
+- calculates a correction score as the sum of all the words found (0 if
+  no words were found).
+- calculates the final corrected score as the original score plus the
+  correction multiplied by a factor:
+
+    S_o = original score
+    C = correction
+    a = scale factor
+    S_c = corrected score
+
+    S_c = S_o + C * a
     
 # RUN GAUSSIANISER
 
