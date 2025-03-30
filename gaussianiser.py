@@ -84,7 +84,7 @@ Files are stored in the following structure:
 
         # Load and preprocess reviews
         original_reviews, original_indices = load_reviews(file_path, args.max_reviews, label_text, label_rating)
-        preprocessed_reviews = preprocess_and_extract_topics(original_reviews, topicGeneral)[0]
+        preprocessed_reviews = preprocess_and_extract_topics(original_reviews)
 
         process_topic_extraction(preprocessed_reviews,topic_general=topicGeneral)
 
