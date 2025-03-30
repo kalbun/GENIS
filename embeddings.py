@@ -17,7 +17,7 @@ preventEmbeddingCaching: bool = False
 # Global variable for the embeddings cache file path
 _EMBEDDINGS_CACHE_FILE = ""
 
-def EmbeddingsCacheInit(embeddings_cache_file: str, prevent_cache: bool = False):
+def embeddingsCache_init(embeddings_cache_file: str, prevent_cache: bool = False):
     global _EMBEDDINGS_CACHE_FILE, topic_embeddings_global
     global overallTopicEmbedding, preventEmbeddingCaching
     _EMBEDDINGS_CACHE_FILE = embeddings_cache_file
@@ -71,7 +71,7 @@ def is_relevant_topic(topic: str, threshold: float = 0.25) -> bool:
     similarity = np.dot(overallTopicEmbedding, topic_emb) / (np.linalg.norm(overallTopicEmbedding) * np.linalg.norm(topic_emb))
     return similarity >= threshold
 
-def apply_pca_to_embeddings(embeddings, n_components: float) -> tuple[np.array, PCA]:
+def embeddings_ApplyPCA(embeddings, n_components: float) -> tuple[np.array, PCA]:
     pca = PCA(n_components=n_components)
     return pca.fit_transform(embeddings), pca
 
@@ -109,7 +109,7 @@ def clustering_topics(
     embeddings = [topic_embeddings_global[topic] for topic in topics_list]
     embeddings_array = np.array(embeddings)
 
-    reduced_vectors, pca = apply_pca_to_embeddings(embeddings_array, n_components=0.90)
+    reduced_vectors, pca = embeddings_ApplyPCA(embeddings_array, n_components=0.90)
     clusterer = hdbscan.HDBSCAN(min_cluster_size=cluster_size, min_samples=min_samples, metric='euclidean')
     labels = clusterer.fit_predict(reduced_vectors)
     

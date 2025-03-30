@@ -7,13 +7,13 @@ import numpy as np
 
 from preprocessing import load_reviews, preprocess_and_extract_topics
 from embeddings import (
-    EmbeddingsCacheInit,
+    embeddingsCache_init,
     clustering_topics,
     process_topic_extraction
 )
 from sentiments import (
-    sentimentCacheInit,
-    sentimentCache_getSentiment_and_AdjustedRating
+    sentimentCache_init,
+    sentimentCache_getSentimentAndAdjustedRating
 )
 
 def main():
@@ -67,9 +67,9 @@ Files are stored in the following structure:
     )
 
     # Initialize embeddings cache
-    EmbeddingsCacheInit(embeddings_cache_file, args.bypass)
+    embeddingsCache_init(embeddings_cache_file, args.bypass)
     # Initialize sentiment cache
-    sentimentCacheInit(sentiments_cache_file, args.bypass)
+    sentimentCache_init(sentiments_cache_file, args.bypass)
 
     label_text = "text"
     label_rating = "rating"
@@ -117,7 +117,7 @@ Files are stored in the following structure:
             calculatedSentiments: list[tuple[str, float]] = []
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=6) as executor:
-                calculatedSentiments = list(executor.map(lambda t: sentimentCache_getSentiment_and_AdjustedRating(t[0], t[1], t[2]), topicsAndDetails))
+                calculatedSentiments = list(executor.map(lambda t: sentimentCache_getSentimentAndAdjustedRating(t[0], t[1], t[2]), topicsAndDetails))
 
             original_ratings: np.ndarray = np.array([t[1] for t in topicsAndDetails])
             adjusted_ratings: np.ndarray = np.array([result[1] for result in calculatedSentiments])

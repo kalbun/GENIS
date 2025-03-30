@@ -24,7 +24,7 @@ llmSemaphore = threading.Semaphore(6)
 # Initialize the Mistral client
 genAI_Client = Mistral(api_key=api_key)
 
-def sentimentCacheInit(cache_file: str, bypass_cache: bool = False):
+def sentimentCache_init(cache_file: str, bypass_cache: bool = False):
     """
     Initialize and load the sentiment cache variables. If bypass_cache is set
     to True, the cache remains empty and is not saved, but can still be used
@@ -38,10 +38,10 @@ def sentimentCacheInit(cache_file: str, bypass_cache: bool = False):
     sentimentCacheFile = cache_file
     sentimentCacheBypass = bypass_cache
     sentimentCache = {}
-    sentimentCacheLoad()
+    sentimentCache_Load()
 
 # Global sentiment cache is maintained per file
-def sentimentCacheLoad() -> dict:
+def sentimentCache_Load() -> dict:
     """
     Load the sentiment cache from the file if it exists and bypass is not set.
     
@@ -101,13 +101,13 @@ def sentimentCache_updateOriginalRating(item: str, originalRating: float, newRat
         sentimentCache[item][str(originalRating)] = newRating
         sentimentCacheSemaphore.release()
 
-def adjust_rating(original_score, topic_sentiments):
+def sentiment_adjustRating(original_score, topic_sentiments):
     numeric_values = [v for v in topic_sentiments.values() if isinstance(v, (int, float))]
     if numeric_values:
         return original_score + sum(numeric_values)
     return original_score
 
-def parseReviewSentimentLLM(text: str, topics: list[str]) -> dict:
+def sentiment_parseScore(text: str, topics: list[str]) -> dict:
     """
     Parse the sentiment of the review text using the LLM model.
     :param text: the review text
@@ -174,7 +174,7 @@ def parseReviewSentimentLLM(text: str, topics: list[str]) -> dict:
 
     return output
 
-def sentimentCache_getSentiment_and_AdjustedRating(text: str, original_rating: float, topics: list[str]) -> tuple[dict, float]:
+def sentimentCache_getSentimentAndAdjustedRating(text: str, original_rating: float, topics: list[str]) -> tuple[dict, float]:
 
     global sentimentCache
 
@@ -186,7 +186,7 @@ def sentimentCache_getSentiment_and_AdjustedRating(text: str, original_rating: f
         if 'sentiments' in cached_data and cached_data['sentiments']:
             topic_sentiments = cached_data['sentiments']
         else:
-            topic_sentiments = parseReviewSentimentLLM(text, topics)
+            topic_sentiments = sentiment_parseScore(text, topics)
             sentimentCache_CreateItem(text, topic_sentiments)
             sentimentCache_Save()
             # You would save cache here if needed
@@ -194,10 +194,10 @@ def sentimentCache_getSentiment_and_AdjustedRating(text: str, original_rating: f
             print("C", end="", flush=True)
             return topic_sentiments, cached_data[str(original_rating)]
         else:
-            adjusted_rating = adjust_rating(original_rating, topic_sentiments)
+            adjusted_rating = sentiment_adjustRating(original_rating, topic_sentiments)
             sentimentCache_updateOriginalRating(text, original_rating, adjusted_rating)
             sentimentCache_Save()
     else:
         sentimentCache_CreateItem(text, {})
-        topic_sentiments, adjusted_rating = sentimentCache_getSentiment_and_AdjustedRating(text, original_rating, topics)
+        topic_sentiments, adjusted_rating = sentimentCache_getSentimentAndAdjustedRating(text, original_rating, topics)
     return topic_sentiments, adjusted_rating
