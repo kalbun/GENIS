@@ -75,7 +75,7 @@ def preprocess_reviews(reviews: list[str]) -> list[str]:
             # Correct spelling on unique tokens
             corrected_tokens: list[str] = []
             for token in unique_tokens:
-                if token not in correction_cache:
+                if 0 and (token not in correction_cache):
                     correctedToken: str = spell_checker.correction(token)
                     if correctedToken != None:
                         correction_cache[token] = correctedToken
