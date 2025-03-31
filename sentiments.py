@@ -64,7 +64,7 @@ def sentimentCache_Save():
     """
     global sentimentCache, sentimentCacheFile, sentimentCacheBypass
 
-    if (not sentimentCacheBypass) and os.path.exists(sentimentCacheFile):
+    if (not sentimentCacheBypass):
         if (sentimentCacheSemaphore.acquire()):
             try:
                 with open(sentimentCacheFile, "wt", encoding="utf-8") as f:
