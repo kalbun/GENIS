@@ -48,6 +48,8 @@ def preprocess_reviews(reviews: list[str]) -> list[str]:
         return wordnet.NOUN
 
     preprocessed_sentences: list[str] = []
+    correction_cache: dict[str, str] = {}
+
     stop_words: set = set(stopwords.words('english'))
     lemmatizer: WordNetLemmatizer = WordNetLemmatizer()
     spell_checker: SpellChecker = SpellChecker()
@@ -60,30 +62,43 @@ def preprocess_reviews(reviews: list[str]) -> list[str]:
         sentences = [review]
         for sentence in sentences:
             tokens = word_tokenize(sentence)
-            # Remove punctuation and special characters
-            tokens = [re.sub(r'\W+', '', word) for word in tokens if word.isalnum()]
+            # Remove punctuation, non-alphanumerics, words with digits, and stop words in one pass.
+            cleaned_tokens = []
+            for token in tokens:
+                if token.isalnum():
+                    token = re.sub(r'\W+', '', token)
+                    if not any(char.isdigit() for char in token) and token not in stop_words:
+                        cleaned_tokens.append(token)
             # Remove duplicates
-            tokens = list(set(tokens))
-            # Correct spelling
-            tokens = [spell_checker.correction(token) for token in tokens]
-            # spell checker sometimes corrects to None. We need to filter them
-            # out, or pos_tag() will throw an error.
-            tokens = [token for token in tokens if token is not None]
-            # Remove words with numbers
-            tokens = [word for word in tokens if not any(char.isdigit() for char in word)]
-            # Remove stop words and lemmatize
-            tokens = [word for word in tokens if word not in stop_words]
-            pos_tags = pos_tag(tokens)
-            tokens = [lemmatizer.lemmatize(word, get_wordnet_pos(tag)) for word, tag in pos_tags]
-            tokens = list(set(tokens))  # Remove duplicates again
+            unique_tokens = list(set(cleaned_tokens))
+            
+            # Correct spelling on unique tokens
+            corrected_tokens: list[str] = []
+            for token in unique_tokens:
+                if token not in correction_cache:
+                    correctedToken: str = spell_checker.correction(token)
+                    if correctedToken != None:
+                        correction_cache[token] = correctedToken
+                        token = correctedToken
+                corrected_tokens.append(token)
+
+            # Apply POS tagging and lemmatization
+            pos_tags = pos_tag(corrected_tokens)
+            lemmatized_tokens = [lemmatizer.lemmatize(word, get_wordnet_pos(tag))
+                                for word, tag in pos_tags]
+            lemmatized_tokens = list(set(lemmatized_tokens))  # Remove duplicates
+
             # Keep only nouns and adjectives
-            tokens = [word for word, pos in pos_tag(tokens) if pos.startswith('NN') or pos.startswith('JJ')]
+            filtered_tokens = [word for word, pos in pos_tag(lemmatized_tokens)
+                            if pos.startswith('NN') or pos.startswith('JJ')]
+
             # Remove short words and stop words
-            tokens = [word for word in tokens if len(word) > 1 and word not in stop_words]
-            # Remove duplicates
-            tokens = list(set(tokens))
+            final_tokens = [word for word in filtered_tokens
+                            if len(word) > 1 and word not in stop_words]
+            final_tokens = list(set(final_tokens))  # Final deduplication
+
             # Rebuild the sentence
-            filtered_sentence = " ".join(tokens)
+            filtered_sentence = " ".join(final_tokens)
             preprocessed_sentences.append(filtered_sentence)
     return preprocessed_sentences
 
