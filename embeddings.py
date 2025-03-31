@@ -54,10 +54,6 @@ def is_relevant_topic(topic: str, threshold: float = 0.25) -> bool:
     similarity = np.dot(overallTopicEmbedding, topic_emb) / (np.linalg.norm(overallTopicEmbedding) * np.linalg.norm(topic_emb))
     return similarity >= threshold
 
-def embeddings_ApplyPCA(embeddings, n_components: float) -> tuple[np.array, PCA]:
-    pca = PCA(n_components=n_components)
-    return pca.fit_transform(embeddings), pca
-
 def clustering_topics(
         reviews: list[str],
         relevance_threshold: float = 0.25,
