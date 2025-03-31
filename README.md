@@ -1,7 +1,8 @@
-Valid up to version 0.4.0
+Valid up to version 0.5.0
 
 # CHANGELOG
 
+0.5.0: added the ability to generate random corrected scores
 0.4.0: added new run parameters
 
 # OVERALL IDEA
@@ -120,6 +121,11 @@ filename
 
 -e --earlystop
   Stop after printing cluster table. Do not execute LLM sentiment analysis.
+
+-fr --forcerandom
+  If this flag is specified, sentiment scores for each topic are not
+  calculated with LLM but randomly selected. This is useful for statistical
+  purposes when attempting to demonstrate null hypothesis.
 
 ## Where to find reviews?
 
