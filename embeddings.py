@@ -40,7 +40,7 @@ def embeddingCache_load():
 def embeddingCache_save():
     global _EMBEDDINGS_CACHE_FILE, topic_embeddings_global, preventEmbeddingCaching
     # Save the embeddings to the cache file unless preventEmbeddingCaching is set to True
-    if (not preventEmbeddingCaching) and os.path.exists(_EMBEDDINGS_CACHE_FILE):
+    if (not preventEmbeddingCaching):
         with open(_EMBEDDINGS_CACHE_FILE, "wb") as f:
             pickle.dump(topic_embeddings_global, f)
 

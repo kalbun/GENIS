@@ -67,7 +67,7 @@ Files are stored in the following structure:
     )
 
     # Initialize embeddings cache
-    embeddingsCache_init(embeddings_cache_file, args.bypass)
+    embeddingsCache_init(embeddings_cache_file)
     # Initialize sentiment cache
     sentimentCache_init(sentiments_cache_file, args.bypass)
 
