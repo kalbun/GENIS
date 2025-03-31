@@ -17,7 +17,7 @@ from sentiments import (
 )
 
 def main():
-    ver = "0.4.0"
+    ver = "0.5.0"
     print(f"Amazon Cluster Analysis v{ver}")
     parser = argparse.ArgumentParser()
     parser.add_argument("filename", type=str, help="Jsonl file to process including extension")
@@ -31,6 +31,7 @@ def main():
     parser.add_argument("-t", "--threshold", type=float, help="Relevance threshold for clustering (default 0.25)", default=0.25)
     parser.add_argument("-b", "--bypass", action="store_true", help="Bypass caches")
     parser.add_argument("-e", "--earlystop", action="store_true", help="Stop after clusters have been printed")
+    parser.add_argument("-fr", "--forcerandom", action="store_true", help="Use random scores instead of sentiment analysis with LLM")
     args = parser.parse_args()
 
     if not os.path.exists(args.filename):
@@ -113,12 +114,12 @@ Files are stored in the following structure (see README.md for details):
                 topics = [topic for _, cluster_info in most_important_clusters
                         for topic in cluster_info["sample_words"].split(", ")
                         if topic.lower() in review["text"].lower()]
-                topicsAndDetails.append((review["text"], review["overall"], topics))
+                topicsAndDetails.append((review["text"], review["overall"], topics, args.forcerandom))
 
             calculatedSentiments: list[tuple[str, float]] = []
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=6) as executor:
-                calculatedSentiments = list(executor.map(lambda t: sentimentCache_getSentimentAndAdjustedRating(t[0], t[1], t[2]), topicsAndDetails))
+                calculatedSentiments = list(executor.map(lambda t: sentimentCache_getSentimentAndAdjustedRating(t[0], t[1], t[2], t[3]), topicsAndDetails))
 
             original_ratings: np.ndarray = np.array([t[1] for t in topicsAndDetails])
             adjusted_ratings: np.ndarray = np.array([result[1] for result in calculatedSentiments])
@@ -130,12 +131,13 @@ Files are stored in the following structure (see README.md for details):
             # Store results in a json file
             if (not os.path.exists(result_file)):
                 with open(result_file, "wt", encoding="utf-8") as f:
-                    f.write("timestamp,run,original,adjusted,seed,reviewID,sentence,appVersion\n")
+                    f.write("timestamp,run,original,adjusted,forcerandom,seed,reviewID,sentence,appVersion\n")
                     f.close()
             with open(result_file, "at", encoding="utf-8") as f:
                 for idx in range(len(calculatedSentiments)):
                     f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')},{run+1},"
                             f"{original_ratings[idx]},{adjusted_ratings[idx]},"
+                            f"{int(args.forcerandom)},"
                             f"{seed},{original_indices.pop()},"
                             f"\"{topicsAndDetails[idx][0][:48].replace('\n','')}...\",{ver}\n")
                 f.close()
