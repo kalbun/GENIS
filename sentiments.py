@@ -174,14 +174,19 @@ def sentiment_parseScore(text: str, topics: list[str]) -> dict:
 
     return output
 
-def sentimentCache_getSentimentAndAdjustedRating(text: str, original_rating: float, topics: list[str]) -> tuple[dict, float]:
+def sentimentCache_getSentimentAndAdjustedRating(text: str, original_rating: float, topics: list[str], forceRandom: bool = False) -> tuple[dict, float]:
 
     global sentimentCache
 
     topic_sentiments: dict = {}
     adjusted_rating: float = 0
-    
-    if text in sentimentCache:
+    import random
+    if (forceRandom):
+        adjusted_rating = original_rating
+        for i in range(len(topics)):
+            adjusted_rating += round(random.random() * 4 - 2)/2
+
+    elif text in sentimentCache:
         cached_data = sentimentCache[text]
         if 'sentiments' in cached_data and cached_data['sentiments']:
             topic_sentiments = cached_data['sentiments']
