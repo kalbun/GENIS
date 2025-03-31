@@ -56,13 +56,14 @@ def main():
     result_file = os.path.join(topicGeneral, f"{topicGeneral}_results.csv")
 
     print(f"""This run uses random seed {seed}
-Files are stored in the following structure:
-.
+Files are stored in the following structure (see README.md for details):
+
 |-- {topicGeneral}
     |-- {topicGeneral}_results.csv
-    |-- {topicGeneral}_sentiments_cache.json
+    |-- {topicGeneral}_embeddings_cache.pkl
     |-- {seed}
-        |-- {topicGeneral}_embeddings_cache.pkl
+        |-- {topicGeneral}_sentiments_cache.json
+        
 """
     )
 
