@@ -131,7 +131,7 @@ def load_reviews(file_path: str, max_reviews: int, label_text: str, label_rating
     print(f"\nLoaded {len(reviews)} reviews.")
     return reviews, random_indices
 
-def preprocess_and_extract_topics(reviews: list[dict]) -> list[str], dict]:
+def preprocess_and_extract_topics(reviews: list[dict]) -> list[str]:
     print("Preprocessing reviews...", end="")
     texts = [review["text"] for review in reviews]
     preprocessed_reviews = preprocess_reviews(texts)
