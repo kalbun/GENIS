@@ -16,7 +16,7 @@ from sentiments import (
 )
 
 def main():
-    ver = "0.5.1"
+    ver = "0.6.0"
     print(f"Amazon Cluster Analysis v{ver}")
     parser = argparse.ArgumentParser()
     parser.add_argument("filename", type=str, help="Jsonl file to process including extension")
