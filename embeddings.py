@@ -178,7 +178,7 @@ def process_topic_extraction(preprocessed_reviews: list[str], topic_general: str
     # Load the transformer model and calculate the overall topic embedding
     # To do so, instead of using just the database name, we invoke an LLM
     # to get a more detailed description of the topic.
-    print("Importing transformer model...")
+    print("Importing transformer library...")
     from sentence_transformers import SentenceTransformer
     print("Loading transformer model...")
     emb_model = SentenceTransformer('all-MiniLM-L6-v2')
