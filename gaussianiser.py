@@ -1,5 +1,4 @@
 import os
-import random
 import time
 import argparse
 import matplotlib.pyplot as plt
@@ -42,7 +41,6 @@ def main():
     # Data are stored into a directory named after the topic and the seed
     # For example, if seed is 1967 and the topic is "general", the directory will be "general/1967"
     seed = args.seed
-    random.seed(seed)
     file_path = args.filename
     topicGeneral = os.path.splitext(os.path.basename(file_path))[0]
     if not os.path.exists(topicGeneral):
@@ -85,7 +83,7 @@ Files are stored in the following structure (see README.md for details):
         preprocessed_reviews: list[str] = []
 
         # Load and preprocess reviews
-        original_reviews, original_indices = load_reviews(file_path, args.max_reviews, label_text, label_rating)
+        original_reviews, original_indices = load_reviews(file_path, args.max_reviews, label_text, label_rating,seed)
         preprocessed_reviews = preprocess_and_extract_topics(original_reviews)
 
         process_topic_extraction(preprocessed_reviews,topic_general=topicGeneral)
@@ -156,10 +154,12 @@ Files are stored in the following structure (see README.md for details):
 
                 plt.figure(figsize=(16, 9))
                 plt.subplot(2, 1, 1)
-                plt.hist(original_ratings, bins=5, color="blue", alpha=0.7, edgecolor="black")
+                bins = np.arange(0.5, 6.5, 1)
+                plt.hist(original_ratings, bins=bins, color="blue", alpha=0.7, edgecolor="black")
                 plt.xlabel("Original Rating")
                 plt.ylabel("Count")
                 plt.title("Distribution of Original Ratings")
+                plt.xticks(np.arange(1, 6, 1))
                 plt.grid(axis="y", linestyle="--", alpha=0.7)
 
                 plt.subplot(2, 1, 2)
@@ -168,7 +168,8 @@ Files are stored in the following structure (see README.md for details):
                 plt.xlabel("Adjusted Rating")
                 plt.ylabel("Count")
                 plt.title("Distribution of Adjusted Ratings")
-                plt.grid(axis="both", linestyle="--", alpha=0.7)
+                plt.grid(axis="both", linestyle="solid", alpha=0.7)
+                plt.minorticks_on()
                 plt.show()
 
 if __name__ == "__main__":
