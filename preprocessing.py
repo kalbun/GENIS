@@ -70,7 +70,7 @@ def preprocess_reviews(reviews: list[str]) -> list[str]:
                     if not any(char.isdigit() for char in token) and token not in stop_words:
                         cleaned_tokens.append(token)
             # Remove duplicates
-            unique_tokens = list(set(cleaned_tokens))
+            unique_tokens = sorted(set(cleaned_tokens))
             
             # Correct spelling on unique tokens
             corrected_tokens: list[str] = []
@@ -86,23 +86,24 @@ def preprocess_reviews(reviews: list[str]) -> list[str]:
             pos_tags = pos_tag(corrected_tokens)
             lemmatized_tokens = [lemmatizer.lemmatize(word, get_wordnet_pos(tag))
                                 for word, tag in pos_tags]
-            lemmatized_tokens = list(set(lemmatized_tokens))  # Remove duplicates
+#            lemmatized_tokens = sorted(set(lemmatized_tokens))  # Remove duplicates
 
             # Keep only nouns and adjectives
-            filtered_tokens = [word for word, pos in pos_tag(lemmatized_tokens)
+            pos_tags = pos_tag(lemmatized_tokens)
+            filtered_tokens = [word for word, pos in pos_tags
                             if pos.startswith('NN') or pos.startswith('JJ')]
 
             # Remove short words and stop words
             final_tokens = [word for word in filtered_tokens
                             if len(word) > 1 and word not in stop_words]
-            final_tokens = list(set(final_tokens))  # Final deduplication
+            final_tokens = sorted(set(final_tokens))  # Final deduplication
 
             # Rebuild the sentence
             filtered_sentence = " ".join(final_tokens)
             preprocessed_sentences.append(filtered_sentence)
     return preprocessed_sentences
 
-def load_reviews(file_path: str, max_reviews: int, label_text: str, label_rating: str) -> tuple[list[dict], set[int]]:
+def load_reviews(file_path: str, max_reviews: int, label_text: str, label_rating: str, seed: int) -> tuple[list[dict], set[int]]:
     """
     Load reviews from a file and return a list of dictionaries containing the text and overall rating.
     
@@ -111,6 +112,7 @@ def load_reviews(file_path: str, max_reviews: int, label_text: str, label_rating
     max_reviews: int - the maximum number of reviews to load.
     label_text: str - label of field containing the review text.
     label_rating: str - label of field containing the review rating.
+    seed: int - seed for random number generation.
 
     Returns:
     tuple[list[dict], set[int]]: a list of dictionaries containing the text and
@@ -124,6 +126,7 @@ def load_reviews(file_path: str, max_reviews: int, label_text: str, label_rating
         for _ in f:
             total_lines += 1
 
+    random.seed(seed)
     random_indices = set(random.sample(range(total_lines), min(max_reviews, total_lines)))
     selected_lines = []
     with open(os.path.join(os.path.dirname(__file__),file_path), "r", encoding="utf-8") as f:
