@@ -85,7 +85,10 @@ def sentimentCache_CreateItem(item: str, topic_sentiments: dict):
     global sentimentCache, sentimentCacheSemaphore
 
     if sentimentCacheSemaphore.acquire():
-        sentimentCache[item] = {'sentiments': topic_sentiments}
+        sentimentCache[item] = {}
+        if topic_sentiments:
+            # If topic sentiments are provided, add them to the cache
+            sentimentCache[item]['sentiments'] = topic_sentiments
         sentimentCacheSemaphore.release()
 
 def sentimentCache_updateOriginalRating(item: str, originalRating: float, newRating: float):
