@@ -1,6 +1,7 @@
 import os
 import json
 import threading
+import textwrap
 import re
 import warnings
 from mistralai import SDKError, Mistral
@@ -122,18 +123,31 @@ def sentiment_parseScore(text: str, topics: list[str]) -> dict:
     if not any(topic.lower() in text.lower() for topic in topics):
         return output
 
-    prompt = f"""Read TEXT:
+    prompt = textwrap.dedent(f"""
+            Your task is to
+            1) search a list of topics in a review text
+            2) calculate sentiment of each topic in the text as score -1, -0.5, 0, 0.5, 1
+            3) return the sentiment for each topic in the list as a JSON object.
+
+            Example text:
+            'This is a great CD. I love it.'
+            Example topics:
+            ['cd','cover']
+            Example output:
+            {{
+                "cd": 1,
+                "cover": 0
+            }}
+
+            Return ONLY AND EXCLUSIVELY a JSON. I do not want comments,
+            explanations, or anything else. I want ONLY the JSON object.
+
+            TEXT:
             {text}
             ---
-            For each topic in this LIST:
-                {topics}
-            1) check if topic is in TEXT
-            2) if yes, return topic sentiment as -1, -0.5, 0, 0.5, 1 
-            Return ***ONLY*** JSON like:
-            {{
-                "topic1": 0.5,
-                "topic2": -0.5
-            }}"""
+            TOPICS:
+            {topics}
+            ---""")
 
     model = "mistral-small-latest"
 
@@ -179,30 +193,39 @@ def sentimentCache_getSentimentAndAdjustedRating(text: str, original_rating: flo
     global sentimentCache
 
     topic_sentiments: dict = {}
-    adjusted_rating: float = 0
+    adjusted_rating: float = original_rating
     import random
     if (forceRandom):
-        adjusted_rating = original_rating
+        # Case 1: adjusted rating is random
         for i in range(len(topics)):
             adjusted_rating += round(random.random() * 4 - 2)/2
-
     elif text in sentimentCache:
+        # Case 2: sentemce already cached
         cached_data = sentimentCache[text]
-        if 'sentiments' in cached_data and cached_data['sentiments']:
-            topic_sentiments = cached_data['sentiments']
-        else:
-            topic_sentiments = sentiment_parseScore(text, topics)
-            sentimentCache_CreateItem(text, topic_sentiments)
-            sentimentCache_Save()
-            # You would save cache here if needed
-        if str(original_rating) in cached_data:
+        if 'sentiments' in cached_data:
+            # Sentiment already cached
+            if cached_data['sentiments']:
+                # Sentiment cached and not empty
+                topic_sentiments = cached_data['sentiments']
+                if str(original_rating) in cached_data:
+                    adjusted_rating = cached_data[str(original_rating)]
+                else:
+                    # Adjusted rating not found in cache, nothing to do
+                    pass
+            else:
+                # Sentiment cached but empty. Nothing to do.
+                pass
             print("C", end="", flush=True)
-            return topic_sentiments, cached_data[str(original_rating)]
         else:
+            # Text cached but sentiment not found. Calculate it and the corrected rating.
+            topic_sentiments = sentiment_parseScore(text, topics)
             adjusted_rating = sentiment_adjustRating(original_rating, topic_sentiments)
             sentimentCache_updateOriginalRating(text, original_rating, adjusted_rating)
             sentimentCache_Save()
+            print(".", end="", flush=True)
     else:
+        # Case 3: sentiment not cached, create a new entry and recurse
         sentimentCache_CreateItem(text, {})
+        sentimentCache_Save()
         topic_sentiments, adjusted_rating = sentimentCache_getSentimentAndAdjustedRating(text, original_rating, topics)
     return topic_sentiments, adjusted_rating
