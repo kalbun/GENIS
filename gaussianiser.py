@@ -15,7 +15,9 @@ from embeddings import (
 )
 from sentiments import (
     sentimentCache_init,
-    sentimentCache_getSentimentAndAdjustedRating
+    sentimentCache_getSentimentAndAdjustedRating,
+    sentiment_aggregateSimilarTopics,
+    sentiment_returnMostRelevantTopic
 )
 
 def main():
@@ -104,6 +106,12 @@ Files are stored in the following structure (see README.md for details):
             min_samples=args.hsample,
         )
 
+        # Recalculate the centroids. They are obtained by calculating the
+        # average of the embeddings of the words in the cluster, but this
+        # doesn't seem to work well. So we use an LLM instead.
+        for idx, (label, cluster_info) in enumerate(most_important_clusters):
+            cluster_info['centroid'] = sentiment_returnMostRelevantTopic(cluster_info['sample_words'])
+
         print("\nMost important clusters:")
         print(f"{'Label':<15}{'Centroid':<20}{'Frequency':<15}{'N. aspects':<12}{'Keywords'}")
         print("=" * 150)
@@ -112,19 +120,65 @@ Files are stored in the following structure (see README.md for details):
                 f"{cluster_info['n_aspects']:<12}{cluster_info['sample_words']}")
 
         if (not args.earlystop):
-            # Process each review for sentiment update
-            print("Updating sentiments (. = calculated, C = cached, E = error, J Json error)\n")
-            topicsAndDetails: list[tuple[str, float, list[str]]] = []
-            for review in original_reviews:
-                topics = [topic for _, cluster_info in most_important_clusters
-                        for topic in cluster_info["sample_words"].split(", ")
-                        if topic.lower() in review["text"].lower()]
-                topicsAndDetails.append((review["text"], review["overall"], topics, args.forcerandom))
+
+            # This is the main part of the code where the sentiment analysis is performed.
+            # The operations are as follows:
+            # 1. create a list where each review is associated with a numnber of topics
+            #    extracted from the most important clusters. There is no one-to-one correspondence
+            #    between reviews and topics, but this is ok.
+            #    The review and its associated topics are stored in a list of tuples
+            # 2. aggregate similar topics stored in most_important_clusters. The reason to do
+            #    it after the association and not before is that we don't know which topics of
+            #    a certain cluster are found in the reviews. Aggregating them before would
+            #    possibly eliminate some topics found in the reviews.
+            # 3. check again the topics associated to each review and remove those no longer
+            #    found. The idea is the that passing just the aggregated topics to the LLM
+            #    will not prevent it from finding other topics.
+
+            # Check to which topic(s) each review belongs to
+            # This is done by checking if the topic is in the review text.
+            # If a topic is found, then the centroid of the cluster is used as the topic
+            # and the review is associated with that topic.
+            # Note that we use the preprocessed reviews and not the original ones! This
+            # is needed becauuse otherwise the exact comparison between the topic and the
+            # terms in the review would not work.
+            # Note that a review can belong to multiple topics.
+            listOfCentroids: list[str] = []
+            topicsAndDetails: list[tuple[str, float, list[str]], bool] = []
+            for o_review, p_review in zip(original_reviews, preprocessed_reviews):
+                for _, cluster_info in most_important_clusters:
+                    # Check if the topic is in the review text. In this case,
+                    # add the centroid to the list and move to the next cluster.
+                    if any(word in p_review.split() for word in cluster_info["sample_words"].split(",")):
+                        listOfCentroids.append(cluster_info["centroid"])
+                # Here we should have a list of centroids for each topic found in the review.
+                # We can then replace the original list of topics with the list of centroids.
+                topicsAndDetails.append((o_review["text"], o_review["overall"], listOfCentroids, args.forcerandom))
+                # Reset the list of centroids for the next review
+                listOfCentroids = []
 
             # count the number of reviews not belonging to any cluster
             unclustered_count = sum(1 for detail in topicsAndDetails if len(detail[2]) == 0)
             print(f"\n{unclustered_count} reviews do not belong to any cluster.")
 
+            if (0 ):
+                print("Aggregating similar topics...", end="", flush=True)
+                # For each cluster, aggregate similar topics to simplify the work of the LLM
+                for _, cluster_info in most_important_clusters:
+                    cluster_info['sample_words'] = sentiment_aggregateSimilarTopics(cluster_info['sample_words'])
+                    cluster_info['n_aspects'] = len(cluster_info['sample_words'])
+                    print(".", end="", flush=True)
+                print(" done.")
+
+            # Now remove topics no longer found in the reviews
+            all_topics = [topic for _, cluster_info in most_important_clusters for topic in cluster_info['sample_words']]
+
+#            for idx, detail in enumerate(topicsAndDetails):
+#                topics = [topic for topic in detail[2] if topic in all_topics]
+#                topicsAndDetails[idx] = (detail[0], detail[1], topics, detail[3])
+
+            # Invoke LLM to aggregate similar topics
+            print("Updating sentiments (. = calculated, _ = skipped, C = cached, E = error, J Json error)\n")
             calculatedSentiments: list[tuple[str, float]] = []
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=6) as executor:
@@ -183,6 +237,11 @@ Files are stored in the following structure (see README.md for details):
                 plt.grid(axis="both", linestyle="solid", alpha=0.7)
                 plt.minorticks_on()
                 plt.show()
+                input("Press Enter to continue...")
+            else:
+                print("Images not shown. Use -n to show them.")
+        else:
+            print("Early stop requested. No sentiment analysis performed.") 
 
 if __name__ == "__main__":
     main()
