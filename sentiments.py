@@ -91,6 +91,24 @@ def sentimentCache_CreateItem(item: str, topic_sentiments: dict):
             sentimentCache[item]['sentiments'] = topic_sentiments
         sentimentCacheSemaphore.release()
 
+def sentimentCache_updateSentiment(item: str, topic_sentiments: dict):
+    """
+    Update the sentiment for the given item in the cache.
+
+    :param item: the item to update in the cache
+    :param topic_sentiments: the topic sentiments to update
+    """
+    global sentimentCache, sentimentCacheSemaphore
+
+    if sentimentCacheSemaphore.acquire():
+        if item in sentimentCache:
+            # If item already exists, update its sentiments
+            sentimentCache[item]['sentiments'] = topic_sentiments
+        else:
+            # If item does not exist, create it with the provided sentiments
+            sentimentCache_CreateItem(item, topic_sentiments)
+        sentimentCacheSemaphore.release()
+
 def sentimentCache_updateOriginalRating(item: str, originalRating: float, newRating: float):
     """
     Update the original rating in the sentiment cache for the given item.
@@ -111,10 +129,64 @@ def sentiment_adjustRating(original_score, topic_sentiments):
         return original_score + sum(numeric_values)
     return original_score
 
-def sentiment_parseScore(text: str, topics: list[str]) -> dict:
+def sentiment_aggregateSimilarTopics(topics: list[str]) -> list[str]:
+    """
+    Aggregate similar topics in the sentiment dictionary.
+    
+    :param topics: the list of topics to aggregate
+    :return: the aggregated topic sentiments dictionary
+    """
+    aggregated_sentiments: list[str] = []
+    prompt: str = ""
+
+    prompt = textwrap.dedent(f"""
+        Aggregate similar topics in a list, to avoid
+        redundancy, and return ONLY the list of aggregated topics.
+
+        Example:
+
+            List: subscription, subscribed, subscriber, reading, reader, read
+            Your output: subscriber, reader
+
+        RETURN ONLY THE FINAL LIST OF TOPICS. No comments,
+        explanations, or anything else!
+
+        Here is the list:
+        {topics}
+        ---""")
+
+    model = "mistral-small-latest"
+
+    if (llmSemaphore.acquire()):
+        try:
+            response = genAI_Client.chat.complete(
+                model = model,
+                temperature=0.0,
+                messages = [
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    },
+                ]
+            )
+        except SDKError as e:
+            llmSemaphore.release()
+            raise e
+        llmSemaphore.release()
+        # attempt to parse the response. Items should be separated by newlines
+        # and should be put in a list.
+        aggregated_sentiments = response.choices[0].message.content.strip().split("\n")
+        # Remove empty strings and strip whitespace from each item
+        aggregated_sentiments = [item.strip() for item in aggregated_sentiments if item.strip()]    
+
+    return aggregated_sentiments
+
+
+def sentiment_parseScore(text: str, rating: int, topics: list[str]) -> dict:
     """
     Parse the sentiment of the review text using the LLM model.
     :param text: the review text
+    :param rating: the original rating of the review
     :param topics: the topics to consider for sentiment analysis
     :return: the sentiments of the review text as a dictionary
     """
@@ -142,8 +214,16 @@ def sentiment_parseScore(text: str, topics: list[str]) -> dict:
                 "cover": 0
             }}
 
-            Return ONLY AND EXCLUSIVELY a JSON. I do not want comments,
-            explanations, or anything else. I want ONLY the JSON object.
+            Example 2:
+                Text: 'an astounding amount of ads, and the cover is awful. Score: 1'
+                Topics: ['advertisement','cover']
+                Output: {{
+                    "ads": -1,
+                    "cover": -1
+                }}
+
+            Return ONLY AND EXCLUSIVELY a JSON. No comments,
+            explanations, or anything else.
 
             TEXT:
             {text}
@@ -213,16 +293,23 @@ def sentimentCache_getSentimentAndAdjustedRating(text: str, original_rating: flo
                 if str(original_rating) in cached_data:
                     adjusted_rating = cached_data[str(original_rating)]
                 else:
-                    # Adjusted rating not found in cache, nothing to do
-                    pass
+                    # Adjusted rating not found in cache. This is an abnormal case.
+                    # It should be calculated and saved.
+                    adjusted_rating = sentiment_adjustRating(original_rating, topic_sentiments)
+                    sentimentCache_updateOriginalRating(text, original_rating, adjusted_rating)
+                    sentimentCache_Save()
+                    print(".", end="", flush=True)
             else:
                 # Sentiment cached but empty. Nothing to do.
-                pass
+                print("_", end="", flush=True)
+
             print("C", end="", flush=True)
         else:
             # Text cached but sentiment not found. Calculate it and the corrected rating.
-            topic_sentiments = sentiment_parseScore(text, topics)
+            topic_sentiments = sentiment_parseScore(text, original_rating, topics)
             adjusted_rating = sentiment_adjustRating(original_rating, topic_sentiments)
+            sentimentCache_updateSentiment(text, topic_sentiments)
+            # Update the adjusted rating in the cache
             sentimentCache_updateOriginalRating(text, original_rating, adjusted_rating)
             sentimentCache_Save()
             print(".", end="", flush=True)
