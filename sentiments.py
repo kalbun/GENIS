@@ -129,6 +129,46 @@ def sentiment_adjustRating(original_score, topic_sentiments):
         return original_score + sum(numeric_values)
     return original_score
 
+def sentiment_returnMostRelevantTopic(topics: list[str]) -> str:
+    """
+    Return the most relevant topic from a list of topics.
+    
+    
+    :param topics: the list of topics to check
+    :return: the most relevant topic from the list
+    """
+
+    prompt: str = ""
+    topic: str = ""
+
+    prompt = textwrap.dedent(f"""
+        Return the most representative topic from the following list:
+        {topics}
+        Return ONLY the topic. No comments, explanations, or anything else!""")
+
+    model = "mistral-small-latest"
+
+    if (llmSemaphore.acquire()):
+        try:
+            response = genAI_Client.chat.complete(
+                model = model,
+                temperature=0.0,
+                messages = [
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    },
+                ]
+            )
+        except SDKError as e:
+            llmSemaphore.release()
+            raise e
+        llmSemaphore.release()
+        # The response should be a single line with the topic.
+        topic = response.choices[0].message.content.strip()
+
+    return topic
+
 def sentiment_aggregateSimilarTopics(topics: list[str]) -> list[str]:
     """
     Aggregate similar topics in the sentiment dictionary.
@@ -143,10 +183,27 @@ def sentiment_aggregateSimilarTopics(topics: list[str]) -> list[str]:
         Aggregate similar topics in a list, to avoid
         redundancy, and return ONLY the list of aggregated topics.
 
-        Example:
+        Example 1:
 
-            List: subscription, subscribed, subscriber, reading, reader, read
-            Your output: subscriber, reader
+            List:
+                subscription
+                subscribed
+                subscriber
+
+            Your output:
+                subscriber
+
+            List 2:
+                subscription
+                subscribed
+                subscriber
+                reading
+                reader
+                read
+                
+            Your output:
+                subscriber
+                reader                             
 
         RETURN ONLY THE FINAL LIST OF TOPICS. No comments,
         explanations, or anything else!
@@ -195,8 +252,8 @@ def sentiment_parseScore(text: str, rating: int, topics: list[str]) -> dict:
     retry_counter: int = 0
     prompt: str = ""
 
-    if not any(topic.lower() in text.lower() for topic in topics):
-        return output
+#    if not any(topic.lower() in text.lower() for topic in topics):
+#        return output
 
     prompt = textwrap.dedent(f"""
             Your task is to
