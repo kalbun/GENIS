@@ -314,7 +314,6 @@ def sentiment_parseScore(text: str, rating: int, topics: list[str]) -> dict:
                     match = re.search(r'\{.*\}', response.choices[0].message.content, re.DOTALL)
                     if match:
                         output = json.loads(match.group(0))
-                        print(".", end="", flush=True)
                 except json.JSONDecodeError:
                     print("J", end="", flush=True)
                 break
@@ -331,6 +330,8 @@ def sentiment_parseScore(text: str, rating: int, topics: list[str]) -> dict:
 def sentimentCache_getSentimentAndAdjustedRating(text: str, original_rating: float, topics: list[str], forceRandom: bool = False) -> tuple[dict, float]:
 
     global sentimentCache
+    global sentimentCacheSemaphore
+    global sentimentCacheFile
 
     topic_sentiments: dict = {}
     adjusted_rating: float = original_rating
@@ -342,37 +343,33 @@ def sentimentCache_getSentimentAndAdjustedRating(text: str, original_rating: flo
     elif text in sentimentCache:
         # Case 2: sentemce already cached
         cached_data = sentimentCache[text]
+        # if text in cache, check if sentiments are cached
         if 'sentiments' in cached_data:
-            # Sentiment already cached
-            if cached_data['sentiments']:
-                # Sentiment cached and not empty
-                topic_sentiments = cached_data['sentiments']
-                if str(original_rating) in cached_data:
-                    adjusted_rating = cached_data[str(original_rating)]
-                else:
-                    # Adjusted rating not found in cache. This is an abnormal case.
-                    # It should be calculated and saved.
-                    adjusted_rating = sentiment_adjustRating(original_rating, topic_sentiments)
-                    sentimentCache_updateOriginalRating(text, original_rating, adjusted_rating)
-                    sentimentCache_Save()
-                    print(".", end="", flush=True)
+            # if sentiments are cached, check if adjusted rating is cached
+            topic_sentiments = cached_data['sentiments']
+            if str(original_rating) in cached_data and cached_data[str(original_rating)]:
+                # if adjusted rating is cached, there is nothing to do
+#                adjusted_rating = cached_data[str(original_rating)]
+                print("C", end="", flush=True)
             else:
-                # Sentiment cached but empty. Nothing to do.
+                # if adjusted rating is not cached, calculate it based on the sentiments
+                adjusted_rating = sentiment_adjustRating(original_rating, topic_sentiments)
+                sentimentCache_updateOriginalRating(text, original_rating, adjusted_rating)
+                sentimentCache_Save()
+                print(".", end="", flush=True)
+        else:
+            # if sentiments are not cached and there are topics, calculate them
+            if (len(topics) > 0):
+                topic_sentiments = sentiment_parseScore(text, original_rating, topics)
+                sentimentCache_updateSentiment(text, topic_sentiments)
+                topic_sentiments, adjusted_rating = sentimentCache_getSentimentAndAdjustedRating(text, original_rating, topics)
+            else:
+                # Sentiment empty and not topics for sentiment analysis.
                 print("_", end="", flush=True)
 
-            print("C", end="", flush=True)
-        else:
-            # Text cached but sentiment not found. Calculate it and the corrected rating.
-            topic_sentiments = sentiment_parseScore(text, original_rating, topics)
-            adjusted_rating = sentiment_adjustRating(original_rating, topic_sentiments)
-            sentimentCache_updateSentiment(text, topic_sentiments)
-            # Update the adjusted rating in the cache
-            sentimentCache_updateOriginalRating(text, original_rating, adjusted_rating)
-            sentimentCache_Save()
-            print(".", end="", flush=True)
     else:
-        # Case 3: sentiment not cached, create a new entry and recurse
+        # if text not in cache, create a new entry and recurse
         sentimentCache_CreateItem(text, {})
-        sentimentCache_Save()
         topic_sentiments, adjusted_rating = sentimentCache_getSentimentAndAdjustedRating(text, original_rating, topics)
+
     return topic_sentiments, adjusted_rating
