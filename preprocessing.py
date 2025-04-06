@@ -16,6 +16,49 @@ nltk.download('stopwords', quiet=True)
 nltk.download('wordnet', quiet=True)
 nltk.download('averaged_perceptron_tagger', quiet=True)
 
+_PREPROCESSING_CACHE: dict = {}
+_PREPROCESSING_CACHE_FILE: str = ""
+
+def preprocessingCache_init(cache_file: str):
+    """
+    Initialize the preprocessing cache and load it from the specified file.
+    
+    Args:
+
+    cache_file: str - the path to the cache file.
+    """
+    global _PREPROCESSING_CACHE, _PREPROCESSING_CACHE_FILE
+    _PREPROCESSING_CACHE_FILE = cache_file
+    _PREPROCESSING_CACHE = {}
+    preprocessingCache_load()
+
+def preprocessingCache_load() -> dict:
+    """
+    Load the preprocessing cache from the file if it exists.
+    
+    Returns:
+    dict: the preprocessing cache as a dictionary.
+    """
+    global _PREPROCESSING_CACHE, _PREPROCESSING_CACHE_FILE
+    if os.path.exists(_PREPROCESSING_CACHE_FILE):
+        try:
+            with open(_PREPROCESSING_CACHE_FILE, "r", encoding="utf-8") as f:
+                _PREPROCESSING_CACHE = json.load(f)
+        except Exception:
+            pass
+    return _PREPROCESSING_CACHE
+
+def preprocessingCache_save():
+    """
+    Save the preprocessing cache to the file.
+    """
+    global _PREPROCESSING_CACHE, _PREPROCESSING_CACHE_FILE
+    try:
+        with open(_PREPROCESSING_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(_PREPROCESSING_CACHE, f, ensure_ascii=False, indent=4)
+    except Exception:
+        pass
+
 def preprocess_reviews(reviews: list[str]) -> list[str]:
     """
     Preprocess the reviews by tokenizing, removing stop words, and lemmatizing.
@@ -61,6 +104,11 @@ def preprocess_reviews(reviews: list[str]) -> list[str]:
             print(".", end="", flush=True)
         sentences = [review]
         for sentence in sentences:
+            # Check if the sentence is already in the cache
+            if sentence in _PREPROCESSING_CACHE:
+                preprocessed_sentences.append(_PREPROCESSING_CACHE[sentence])
+                continue
+            # Tokenize the sentence
             tokens = word_tokenize(sentence)
             # Remove punctuation, non-alphanumerics, words with digits, and stop words in one pass.
             cleaned_tokens = []
@@ -75,7 +123,7 @@ def preprocess_reviews(reviews: list[str]) -> list[str]:
             # Correct spelling on unique tokens
             corrected_tokens: list[str] = []
             for token in unique_tokens:
-                if 0 and (token not in correction_cache):
+                if 1 and (token not in correction_cache):
                     correctedToken: str = spell_checker.correction(token)
                     if correctedToken != None:
                         correction_cache[token] = correctedToken
@@ -100,6 +148,10 @@ def preprocess_reviews(reviews: list[str]) -> list[str]:
 
             # Rebuild the sentence
             filtered_sentence = " ".join(final_tokens)
+            # Save to cache
+            _PREPROCESSING_CACHE[sentence] = filtered_sentence
+            preprocessingCache_save()
+            # Append to the list of preprocessed sentences
             preprocessed_sentences.append(filtered_sentence)
     return preprocessed_sentences
 

@@ -4,7 +4,10 @@ import argparse
 import matplotlib.pyplot as plt
 import numpy as np
 
-from preprocessing import load_reviews, preprocess_and_extract_topics
+from preprocessing import (
+    load_reviews, preprocess_and_extract_topics,
+    preprocessingCache_init
+)
 from embeddings import (
     embeddingsCache_init,
     clustering_topics,
@@ -51,6 +54,7 @@ def main():
     # Set cache files (shared amongst the modules)
     sentiments_cache_file = os.path.join(topicAndSeed, f"{topicGeneral}_sentiments_cache.json")
     embeddings_cache_file = os.path.join(topicGeneral, f"{topicGeneral}_embeddings_cache.pkl")
+    preprocessing_cache_file = os.path.join(topicGeneral, f"{topicGeneral}_preprocessing_cache.json")
     # Set result file (csv format, containing original and adjusted ratings)
     result_file = os.path.join(topicGeneral, f"{topicGeneral}_results.csv")
 
@@ -60,6 +64,7 @@ Files are stored in the following structure (see README.md for details):
 |-- {topicGeneral}
     |-- {topicGeneral}_results.csv
     |-- {topicGeneral}_embeddings_cache.pkl
+    |-- {topicGeneral}_preprocessing_cache.json
     |-- {seed}
         |-- {topicGeneral}_sentiments_cache.json
         
@@ -70,6 +75,8 @@ Files are stored in the following structure (see README.md for details):
     embeddingsCache_init(embeddings_cache_file)
     # Initialize sentiment cache
     sentimentCache_init(sentiments_cache_file, args.bypass)
+    # Initialize preprocessing cache
+    preprocessingCache_init(preprocessing_cache_file)
 
     label_text = "text"
     label_rating = "rating"
@@ -114,6 +121,10 @@ Files are stored in the following structure (see README.md for details):
                         if topic.lower() in review["text"].lower()]
                 topicsAndDetails.append((review["text"], review["overall"], topics, args.forcerandom))
 
+            # count the number of reviews not belonging to any cluster
+            unclustered_count = sum(1 for detail in topicsAndDetails if len(detail[2]) == 0)
+            print(f"\n{unclustered_count} reviews do not belong to any cluster.")
+
             calculatedSentiments: list[tuple[str, float]] = []
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=6) as executor:
@@ -124,6 +135,7 @@ Files are stored in the following structure (see README.md for details):
             # This operation allows to change the strength of the adjustment
             adjustements: np.ndarray = (adjusted_ratings - original_ratings)
             adjusted_ratings = original_ratings + adjustements * 0.5
+            adjusted_ratings = adjustements * 0.5
             print("\nDone.")
 
             # Store results in a json file
