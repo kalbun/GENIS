@@ -175,6 +175,30 @@ def process_topic_extraction(preprocessed_reviews: list[str], topic_general: str
     new_count: int = 0
     descriptiveTopic: str = ""
 
+    # Ask the LLM to describe the general topic
+
+    print("Extracting topics...", end="", flush=True)
+    for review in preprocessed_reviews:
+        extracted.extend(review.split())
+    extracted = sorted(set(extracted))
+    print(f"{len(extracted)} unique topics")
+
+    embeddingCache_load()
+    # Check if the embeddings are already in the cache
+    new_count = 0
+    for i, topic in enumerate(extracted):
+        if topic not in embeddingsCache:
+            new_count += 1
+    # Attempt to load the overall topic embedding from the cache
+    if topic_general not in embeddingsCache:
+        new_count += 1
+    else:
+        overallTopicEmbedding = embeddingsCache[topic_general]
+
+    if new_count == 0:
+        print("All embeddings already cached")
+        return
+
     # Load the transformer model and calculate the overall topic embedding
     # To do so, instead of using just the database name, we invoke an LLM
     # to get a more detailed description of the topic.
@@ -182,20 +206,11 @@ def process_topic_extraction(preprocessed_reviews: list[str], topic_general: str
     from sentence_transformers import SentenceTransformer
     print("Loading transformer model...")
     emb_model = SentenceTransformer('all-MiniLM-L6-v2')
-    # Ask the LLM to describe the general topic
-    descriptiveTopic = describe_general_topic(topic_general)
-    # then calculate the embedding
-    overallTopicEmbedding = emb_model.encode(descriptiveTopic)
-#    extract_and_cache_embeddings(preprocessed_reviews, emb_model)
-
-    print("Extracting topics...", end="", flush=True)
-    for review in preprocessed_reviews:
-        extracted.extend(review.split())
-    extracted = sorted(set(extracted))
-    print(f"{len(extracted)} unique topics")
     print("Calculating embeddings...", end="", flush=True)
+    # Calculate the overall topic embedding
+    overallTopicEmbedding = emb_model.encode(topic_general)
+    embeddingsCache[topic_general] = overallTopicEmbedding
 
-    embeddingCache_load()
     new_count = 0
     for i, topic in enumerate(extracted):
         if topic not in embeddingsCache:
