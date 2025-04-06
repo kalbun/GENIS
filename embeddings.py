@@ -10,7 +10,7 @@ from collections import Counter
 warnings.simplefilter(action='ignore')
 
 # Global variables for embeddings and the overall topic
-topic_embeddings_global = {}
+embeddingsCache = {}
 overallTopicEmbedding = None
 # variable to prevent embedding caching
 preventEmbeddingCaching: bool = False
@@ -22,31 +22,31 @@ def embeddingsCache_init(embeddings_cache_file: str, prevent_cache: bool = False
     Initialize and load the embeddings cache variables. If prevent_cache is set
     to True, the cache remains empty and is not saved, but can still be used
     """
-    global _EMBEDDINGS_CACHE_FILE, topic_embeddings_global
+    global _EMBEDDINGS_CACHE_FILE, embeddingsCache
     global overallTopicEmbedding, preventEmbeddingCaching
     _EMBEDDINGS_CACHE_FILE = embeddings_cache_file
     preventEmbeddingCaching = prevent_cache
-    topic_embeddings_global = {}
+    embeddingsCache = {}
     overallTopicEmbedding = None
     embeddingCache_load()
 
 def embeddingCache_load():
-    global _EMBEDDINGS_CACHE_FILE, topic_embeddings_global, preventEmbeddingCaching
+    global _EMBEDDINGS_CACHE_FILE, embeddingsCache, preventEmbeddingCaching
     # Load the embeddings from the cache file unless preventEmbeddingCaching is set to True
     if (not preventEmbeddingCaching) and os.path.exists(_EMBEDDINGS_CACHE_FILE):
         with open(_EMBEDDINGS_CACHE_FILE, "rb") as f:
-            topic_embeddings_global = pickle.load(f)
+            embeddingsCache = pickle.load(f)
 
 def embeddingCache_save():
-    global _EMBEDDINGS_CACHE_FILE, topic_embeddings_global, preventEmbeddingCaching
+    global _EMBEDDINGS_CACHE_FILE, embeddingsCache, preventEmbeddingCaching
     # Save the embeddings to the cache file unless preventEmbeddingCaching is set to True
     if (not preventEmbeddingCaching):
         with open(_EMBEDDINGS_CACHE_FILE, "wb") as f:
-            pickle.dump(topic_embeddings_global, f)
+            pickle.dump(embeddingsCache, f)
 
 def is_relevant_topic(topic: str, threshold: float = 0.25) -> bool:
-    global overallTopicEmbedding, topic_embeddings_global
-    topic_emb = topic_embeddings_global.get(topic)
+    global overallTopicEmbedding, embeddingsCache
+    topic_emb = embeddingsCache.get(topic)
     if topic_emb is None:
         return False
     if np.linalg.norm(overallTopicEmbedding) == 0 or np.linalg.norm(topic_emb) == 0:
@@ -71,7 +71,7 @@ def clustering_topics(
     Returns:
         list[tuple]: List of tuples containing cluster information.
     """
-    global topic_embeddings_global, overallTopicEmbedding
+    global embeddingsCache, overallTopicEmbedding
     print(f"Creating relevant clusters (ST={relevance_threshold}, HS={cluster_size}, HM={min_samples})...")
     print("One dot = 1000 reviews", end="", flush=True)
     relevant_topics = []
@@ -86,7 +86,7 @@ def clustering_topics(
 
     topic_counts = Counter(relevant_topics)
     topics_list = list(topic_counts.keys())
-    embeddings = [topic_embeddings_global[topic] for topic in topics_list]
+    embeddings = [embeddingsCache[topic] for topic in topics_list]
 #    embeddings_array = np.array(embeddings)
 
     # Apply PCA to reduce dimensionality
@@ -168,7 +168,7 @@ def describe_general_topic(topic: str) -> str:
 def process_topic_extraction(preprocessed_reviews: list[str], topic_general: str):
     """
     """
-    global topic_embeddings_global, overallTopicEmbedding
+    global embeddingsCache, overallTopicEmbedding
 
     emb_model: SentenceTransformer = None
     extracted: list[str] = []
@@ -198,8 +198,8 @@ def process_topic_extraction(preprocessed_reviews: list[str], topic_general: str
     embeddingCache_load()
     new_count = 0
     for i, topic in enumerate(extracted):
-        if topic not in topic_embeddings_global:
-            topic_embeddings_global[topic] = emb_model.encode(topic)
+        if topic not in embeddingsCache:
+            embeddingsCache[topic] = emb_model.encode(topic)
             new_count += 1
         if i and i % 1000 == 0:
             print(".", end="", flush=True)
