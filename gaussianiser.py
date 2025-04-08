@@ -5,20 +5,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from preprocessing import (
-    load_reviews, preprocess_and_extract_topics,
+    load_reviews, preprocess_reviews,
     preprocessingCache_init
 )
-from embeddings import (
-    embeddingsCache_init,
-    clustering_topics,
-    process_topic_extraction
-)
+from embeddings import EmbeddingsManager
+
 from sentiments import (
     sentimentCache_init,
     sentimentCache_getSentimentAndAdjustedRating,
     sentiment_aggregateSimilarTopics,
     sentiment_returnMostRelevantTopic
 )
+
+embeddingManager: EmbeddingsManager = None
 
 def main():
     ver = "0.7.0-experimental"
@@ -74,7 +73,11 @@ Files are stored in the following structure (see README.md for details):
     )
 
     # Initialize embeddings cache
-    embeddingsCache_init(embeddings_cache_file)
+    embeddingManager = EmbeddingsManager(
+        embeddings_cache_file=embeddings_cache_file,
+        prevent_cache=args.bypass
+    )
+
     # Initialize sentiment cache
     sentimentCache_init(sentiments_cache_file, args.bypass)
     # Initialize preprocessing cache
@@ -91,15 +94,21 @@ Files are stored in the following structure (see README.md for details):
         original_indices: set[int] = set()
         preprocessed_reviews: list[str] = []
 
-        # Load and preprocess reviews
+        # Load a random sample of reviews from the file, preprocess them, then
+        # calculate the embeddings of the words found in the reviews.
         original_reviews, original_indices = load_reviews(file_path, args.max_reviews, label_text, label_rating,seed)
-        preprocessed_reviews = preprocess_and_extract_topics(original_reviews)
+#        preprocessed_reviews = preprocess_and_extract_topics(original_reviews)
 
-        process_topic_extraction(preprocessed_reviews,topic_general=topicGeneral)
+        print("Preprocessing reviews...", end="")
+        texts: list[list[str]] = [review["text"] for review in original_reviews]
+        preprocessed_reviews = preprocess_reviews(texts)
+        print(" completed.")
+
+        # Cache the embeddiing of the words found in the reviews
+        embeddingManager.cacheTopicEmbeddings(preprocessed_reviews,topic_general=topicGeneral)
 
         # Cluster topics based on embeddings calculated during pre-processing
-        most_important_clusters: list[tuple] = []
-        most_important_clusters = clustering_topics(
+        most_important_clusters: list[tuple] = embeddingManager.clustering_topics(
             reviews=preprocessed_reviews,
             relevance_threshold=args.threshold,
             cluster_size=args.hcluster,
@@ -159,7 +168,7 @@ Files are stored in the following structure (see README.md for details):
 
             # count the number of reviews not belonging to any cluster
             unclustered_count = sum(1 for detail in topicsAndDetails if len(detail[2]) == 0)
-            print(f"\n{unclustered_count} reviews do not belong to any cluster.")
+            print(f"\n{len(topicsAndDetails)} reviews of which {unclustered_count} orphan.")
 
             if (0 ):
                 print("Aggregating similar topics...", end="", flush=True)
@@ -173,17 +182,14 @@ Files are stored in the following structure (see README.md for details):
             # Now remove topics no longer found in the reviews
             all_topics = [topic for _, cluster_info in most_important_clusters for topic in cluster_info['sample_words']]
 
-#            for idx, detail in enumerate(topicsAndDetails):
-#                topics = [topic for topic in detail[2] if topic in all_topics]
-#                topicsAndDetails[idx] = (detail[0], detail[1], topics, detail[3])
-
-            # Invoke LLM to aggregate similar topics
             print("Updating sentiments (. = calculated, _ = skipped, C = cached, E = error, J Json error)\n")
             calculatedSentiments: list[tuple[str, float]] = []
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=6) as executor:
                 calculatedSentiments = list(executor.map(lambda t: sentimentCache_getSentimentAndAdjustedRating(t[0], t[1], t[2], t[3]), topicsAndDetails))
 
+#            original_ratings: np.ndarray = np.array([t[1] for t in topicsAndDetails if t[2] != []])
+#            adjusted_ratings: np.ndarray = np.array([result[1] for result in calculatedSentiments if result[0] != {}])
             original_ratings: np.ndarray = np.array([t[1] for t in topicsAndDetails])
             adjusted_ratings: np.ndarray = np.array([result[1] for result in calculatedSentiments])
             # This operation allows to change the strength of the adjustment
