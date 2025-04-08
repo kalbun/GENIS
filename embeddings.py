@@ -44,6 +44,38 @@ class EmbeddingsManager:
         )
         return similarity >= threshold
 
+    def extract_relevant_topics(
+        self,
+        reviews: list[str],
+        relevance_threshold: float = 0.25,
+    ) -> tuple[list[str], list[str], list[str]]:
+        """
+        Extracts the relevant topics from the reviews based on their embeddings.
+
+        Args:
+            reviews: List of reviews.
+            relevance_threshold: minimum semantic similarity for topics to be
+                considered relevant.
+        Returns:
+            list[str]: List of unique and sorted relevant topics.
+            list[str]: List of relevant reviews.
+            list[str]: List of irrelevant reviews.
+        """
+        relevant_topics: list[str] = []
+        relevantReviews: list[str] = []
+        irrelevantReviews: list[str] = []
+
+        for i, review in enumerate(reviews):
+            current_topics = [t for t in review.split() if self.is_relevant_topic(t, relevance_threshold)]
+            if len(current_topics) == 0:
+                irrelevantReviews.append(review)
+            else:
+                relevantReviews.append(review)
+                relevant_topics.extend(current_topics)
+            if i and i % 1000 == 0:
+                print(".", end="", flush=True)
+        return sorted(set(relevant_topics)), relevantReviews, irrelevantReviews
+
     def clustering_topics(
         self,
         reviews: list[str],
@@ -63,20 +95,16 @@ class EmbeddingsManager:
             list[tuple]: List of tuples containing cluster information.
         """
         relevant_topics: list[str] = []
-        irrelevantReviewsCount: int = 0
+        relevantReviews: list[str] = []
+        irrelevantReviews: list[str] = []
 
         print(f"Creating relevant clusters (ST={relevance_threshold}, HS={cluster_size}, HM={min_samples})...")
         print("One dot = 1000 reviews", end="", flush=True)
 
-        for i, review in enumerate(reviews):
-            current_topics = [t for t in review.split() if self.is_relevant_topic(t, relevance_threshold)]
-            if len(current_topics) == 0:
-                irrelevantReviewsCount += 1
-            else:
-                relevant_topics.extend(current_topics)
-            if i and i % 1000 == 0:
-                print(".", end="", flush=True)
-        print(f"\n{len(reviews)} reviews of which {irrelevantReviewsCount} irrelevant.")
+        relevant_topics, relevantReviews, irrelevantReviews = self.extract_relevant_topics(
+            reviews,relevance_threshold
+        )
+        print(f"\n{len(reviews)} reviews of which {len(irrelevantReviews)} irrelevant.")
 
         topic_counts = Counter(relevant_topics)
         topics_list = list(topic_counts.keys())
@@ -88,7 +116,11 @@ class EmbeddingsManager:
         self.overallTopicEmbedding = pca.transform(np.array([self.overallTopicEmbedding]))
         del pca
 
-        clusterer = hdbscan.HDBSCAN(min_cluster_size=cluster_size, min_samples=min_samples, metric='euclidean')
+        clusterer = hdbscan.HDBSCAN(
+            min_cluster_size=cluster_size, 
+            min_samples=min_samples, 
+            metric='euclidean'
+        )
         labels = clusterer.fit_predict(reduced_vectors)
 
         centroids = {label: np.mean(reduced_vectors[labels == label], axis=0)
@@ -153,9 +185,18 @@ class EmbeddingsManager:
             response = topic  # Fallback to the original topic if there's an error
         return response
 
-    def process_topic_extraction(self, preprocessed_reviews: list[str], topic_general: str):
+    def cacheTopicEmbeddings(self, preprocessed_reviews: list[str], topic_general: str):
         """
-        Process topic extraction by calculating embeddings and caching them.
+        Calculate the topic embeddings for the given reviews and put them in the cache.
+        The calculation executes these steps:
+        1. Extract topics from the reviews creating a list of unique terms.
+        2. Check if the topics are already in the cache.
+        3. If not, calculate the embeddings for the topics and the general topic.
+        4. Save the embedding in the cache.
+
+        :param preprocessed_reviews: List of preprocessed reviews.
+        :param topic_general: General topic to be used for embedding.
+        :return: None
         """
         extracted: list[str] = []
         new_count: int = 0
