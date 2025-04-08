@@ -62,12 +62,9 @@ def preprocessingCache_save():
 def preprocess_reviews(reviews: list[str]) -> list[str]:
     """
     Preprocess the reviews by tokenizing, removing stop words, and lemmatizing.
- 
-    Args:
-    reviews: list[str] - the list of reviews to preprocess.
 
-    Returns:
-    list[str]: the preprocessed reviews.
+    :param reviews: list[str] - the list of reviews to preprocess.
+    :return: list[str] - the list of preprocessed reviews.
     """
 
     def get_wordnet_pos(tag: str) -> str:
@@ -200,11 +197,3 @@ def load_reviews(file_path: str, max_reviews: int, label_text: str, label_rating
             continue
     print(f"\nLoaded {len(reviews)} reviews.")
     return reviews, random_indices
-
-def preprocess_and_extract_topics(reviews: list[dict]) -> list[str]:
-    print("Preprocessing reviews...", end="")
-    texts = [review["text"] for review in reviews]
-    preprocessed_reviews = preprocess_reviews(texts)
-    print(" completed.")
-    # Return only preprocessed reviews – embedding extraction will occur in the embeddings module.
-    return preprocessed_reviews
