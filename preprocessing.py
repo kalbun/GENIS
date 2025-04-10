@@ -135,8 +135,13 @@ def preprocess_reviews(reviews: list[str]) -> list[str]:
 
             # Keep only nouns and adjectives
             pos_tags = pos_tag(lemmatized_tokens)
-            filtered_tokens = [word for word, pos in pos_tags
-                            if pos.startswith('NN') or pos.startswith('JJ')]
+            filtered_tokens = [
+                word for word, pos in pos_tags
+                if
+                    pos.startswith('NN')
+                    or
+                    pos.startswith('JJ')
+            ]
 
             # Remove short words and stop words
             final_tokens = [word for word in filtered_tokens
