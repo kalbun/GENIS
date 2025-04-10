@@ -88,99 +88,148 @@ Files are stored in the following structure (see README.md for details):
 
     # Starting from this point, the code is repeated for each run
     for run in range(args.runs):
-        print(f"Run {run + 1}/{args.runs}")
 
         original_reviews: list[dict] = []
         original_indices: set[int] = set()
         preprocessed_reviews: list[str] = []
+        bagOfWords: list[str] = []
+        counter: int = 0
 
+        print(f"Run {run + 1}/{args.runs}")
         # Load a random sample of reviews from the file, preprocess them, then
         # calculate the embeddings of the words found in the reviews.
         original_reviews, original_indices = load_reviews(file_path, args.max_reviews, label_text, label_rating,seed)
 #        preprocessed_reviews = preprocess_and_extract_topics(original_reviews)
 
         print("Preprocessing reviews...", end="")
-        texts: list[list[str]] = [review["text"] for review in original_reviews]
-        preprocessed_reviews = preprocess_reviews(texts)
+        preprocessed_reviews = preprocess_reviews([review["text"] for review in original_reviews])
+
+        bagOfWords = [term for review in preprocessed_reviews for term in review.split()]
+        # add specific and general topics to the bag of words
+        bagOfWords.extend([topicGeneral])
+        bagOfWords.extend("purchase")
         print(" completed.")
+        # Cache the embeddings of the words found in the reviews
+        embeddingManager.cacheTopicEmbeddings(bagOfWords)
 
-        # Cache the embeddiing of the words found in the reviews
-        embeddingManager.cacheTopicEmbeddings(preprocessed_reviews,topic_general=topicGeneral)
+        specific_topics: list[str] = []
+        generic_topics: list[str] = []
+        irrelevantReviews: list[str] = []
+        generic_clusters: list[tuple] = []
+        specific_clusters: list[tuple] = []
+        aggregated_clusters: list[tuple] = []
 
-        # Cluster topics based on embeddings calculated during pre-processing
-        most_important_clusters: list[tuple] = embeddingManager.clustering_topics(
+        # Extract the topics semantically related to the general topic of the reviews.
+        print(f"Extracting review-specific topics (similarity threshold {args.threshold})")
+        specific_topics, _, irrelevantReviews = embeddingManager.extract_relevant_topics(
             reviews=preprocessed_reviews,
+            referenceTopic=topicGeneral,
             relevance_threshold=args.threshold,
+        )
+        counter += len(irrelevantReviews)
+        # Cluster topics based on embeddings calculated during pre-processing
+        print(f"Creating relevant clusters (HS={args.hcluster}, HM={args.hsample})...")
+        specific_clusters = embeddingManager.clustering_topics(
+            relevant_topics=specific_topics,
             cluster_size=args.hcluster,
             min_samples=args.hsample,
+            min_topics=5
         )
 
-        # Recalculate the centroids. They are obtained by calculating the
-        # average of the embeddings of the words in the cluster, but this
-        # doesn't seem to work well. So we use an LLM instead.
-        for idx, (label, cluster_info) in enumerate(most_important_clusters):
-            cluster_info['centroid'] = sentiment_returnMostRelevantTopic(cluster_info['sample_words'])
+        # Now do the same for the purchase topic, but instead of using all the reviews,
+        # we use only the reviews not matching the general topic.
+        print(f"Extracting general topics from reviews not matching the reference topic")
+        generic_topics, _, irrelevantReviews = embeddingManager.extract_relevant_topics(
+            reviews=irrelevantReviews,
+            referenceTopic="purchase",
+            relevance_threshold=args.threshold,
+        )
+        counter += len(irrelevantReviews)
+        print(f"Creating relevant clusters (HS={args.hcluster}, HM={args.hsample})...")
+        generic_clusters = embeddingManager.clustering_topics(
+            relevant_topics=generic_topics,
+            cluster_size=args.hcluster,
+            min_samples=args.hsample,
+            min_topics=3
+        )
+        print(f"Irrelevant reviews {counter}/{len(preprocessed_reviews)}.")
+
+        aggregated_clusters = specific_clusters
+#        aggregated_clusters = generic_clusters + specific_clusters
+#        specific_topics.extend(generic_topics)
+
+        # Recalculate the centroids. Those obtained by calculating the
+        # average of the embeddings of the words in the cluster don't
+        # seem very useful.
+
+        # This is a dictionary where the key is the cluster label and the value
+        #  is the list of words in the cluster.
+        lookupTable: dict[str, str] = {}
+
+        print("Invoking LLM to calculate pseudo-centroids...", end="")
+        for label, cluster_info in aggregated_clusters:
+            cluster_info['centroid'] = sentiment_returnMostRelevantTopic(
+                cluster_info['sample_words']
+            )
+            # Save the centroid in the lookup table
+            lookupTable[label] = cluster_info['centroid']
+            print(".", end="", flush=True)
+        print(" done.")
+
 
         print("\nMost important clusters:")
         print(f"{'Label':<15}{'Centroid':<20}{'Frequency':<15}{'N. aspects':<12}{'Keywords'}")
         print("=" * 150)
-        for label, cluster_info in most_important_clusters:
+        for label, cluster_info in aggregated_clusters:
             print(f"{label:<15}{cluster_info['centroid']:<20}{cluster_info['frequency']:<15}"
                 f"{cluster_info['n_aspects']:<12}{cluster_info['sample_words']}")
 
         if (not args.earlystop):
 
-            # This is the main part of the code where the sentiment analysis is performed.
-            # The operations are as follows:
-            # 1. create a list where each review is associated with a numnber of topics
-            #    extracted from the most important clusters. There is no one-to-one correspondence
-            #    between reviews and topics, but this is ok.
-            #    The review and its associated topics are stored in a list of tuples
-            # 2. aggregate similar topics stored in most_important_clusters. The reason to do
-            #    it after the association and not before is that we don't know which topics of
-            #    a certain cluster are found in the reviews. Aggregating them before would
-            #    possibly eliminate some topics found in the reviews.
-            # 3. check again the topics associated to each review and remove those no longer
-            #    found. The idea is the that passing just the aggregated topics to the LLM
-            #    will not prevent it from finding other topics.
+            # Now we use the list of words in the clusters to find the topics in the reviews
+            # to be used for the sentiment analysis.
+            # So we check if at least word of a given cluster is in the review, and if so,
+            # we associate the review with the related centroid.
+            #
+            # For example, if a cluster contain { magazine, publication, article } and the
+            # centroid is "magazine", then if a review contains the word "publication" we
+            # associate the review with the centroid "magazine".
+            # This allows to search the sentiments for a limited number of topics,
+            # instead of the whole cluster.
 
-            # Check to which topic(s) each review belongs to
-            # This is done by checking if the topic is in the review text.
-            # If a topic is found, then the centroid of the cluster is used as the topic
-            # and the review is associated with that topic.
-            # Note that we use the preprocessed reviews and not the original ones! This
-            # is needed becauuse otherwise the exact comparison between the topic and the
-            # terms in the review would not work.
-            # Note that a review can belong to multiple topics.
             listOfCentroids: list[str] = []
             topicsAndDetails: list[tuple[str, float, list[str]], bool] = []
             for o_review, p_review in zip(original_reviews, preprocessed_reviews):
-                for _, cluster_info in most_important_clusters:
-                    # Check if the topic is in the review text. In this case,
-                    # add the centroid to the list and move to the next cluster.
-                    if any(word in p_review.split() for word in cluster_info["sample_words"].split(",")):
-                        listOfCentroids.append(cluster_info["centroid"])
-                # Here we should have a list of centroids for each topic found in the review.
-                # We can then replace the original list of topics with the list of centroids.
-                topicsAndDetails.append((o_review["text"], o_review["overall"], listOfCentroids, args.forcerandom))
-                # Reset the list of centroids for the next review
                 listOfCentroids = []
+                # For each review, we check if the review contains at least one word of a cluster.
+                for _, cluster_info in aggregated_clusters:
+                    if any(word in p_review.split() for word in cluster_info["sample_words"].split(",")):
+                        # If so, we add the centroid to the list of centroids.
+                        listOfCentroids.append(cluster_info["centroid"])
+                # There shouldn't be duplicates, but just in case we remove them.
+                listOfCentroids = list(set(listOfCentroids))
+                # Now we save the original text, its rating and the list of associated centroids.
+                topicsAndDetails.append((o_review["text"], o_review["overall"], listOfCentroids, args.forcerandom))
+
+            # Write in the log the associated centroids for each review
+            with open(os.path.join(topicAndSeed, f"{topicGeneral}_clusters.txt"), "wt", encoding="utf-8") as f:
+                for o_review, p_review, listOfCentroids, _ in topicsAndDetails:
+                    f.write(f"{o_review}\n{p_review}\n{listOfCentroids}\n\n")
+                f.close()    
 
             # count the number of reviews not belonging to any cluster
             unclustered_count = sum(1 for detail in topicsAndDetails if len(detail[2]) == 0)
             print(f"\n{len(topicsAndDetails)} reviews of which {unclustered_count} orphan.")
 
+            # Not executed
             if (0 ):
                 print("Aggregating similar topics...", end="", flush=True)
                 # For each cluster, aggregate similar topics to simplify the work of the LLM
-                for _, cluster_info in most_important_clusters:
+                for _, cluster_info in aggregated_clusters:
                     cluster_info['sample_words'] = sentiment_aggregateSimilarTopics(cluster_info['sample_words'])
                     cluster_info['n_aspects'] = len(cluster_info['sample_words'])
                     print(".", end="", flush=True)
                 print(" done.")
-
-            # Now remove topics no longer found in the reviews
-            all_topics = [topic for _, cluster_info in most_important_clusters for topic in cluster_info['sample_words']]
 
             print("Updating sentiments (. = calculated, _ = skipped, C = cached, E = error, J Json error)\n")
             calculatedSentiments: list[tuple[str, float]] = []
