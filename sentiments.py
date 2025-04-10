@@ -17,6 +17,8 @@ sentimentCacheBypass: bool = False
 # Using a semaphore for thread-safe access
 sentimentCacheSemaphore = threading.Semaphore(1)
 
+sentimentLogFile: str = "sentiment.log"
+
 # Using a semaphore for thread-safe access to the LLM
 # Limiting the number of concurrent requests to 6, because
 # Mistral has a limit of 6 concurrent requests per API key
@@ -131,8 +133,7 @@ def sentiment_adjustRating(original_score, topic_sentiments):
 
 def sentiment_returnMostRelevantTopic(topics: list[str]) -> str:
     """
-    Return the most relevant topic from a list of topics.
-    
+    Return a term that describes all the topics in the list.
     
     :param topics: the list of topics to check
     :return: the most relevant topic from the list
@@ -142,9 +143,12 @@ def sentiment_returnMostRelevantTopic(topics: list[str]) -> str:
     topic: str = ""
 
     prompt = textwrap.dedent(f"""
-        Return the most representative topic from the following list:
+        Return most representative topic from following list,
+        Return ONLY topic. No comments, explanations, anything else!
+        List:
+
         {topics}
-        Return ONLY the topic. No comments, explanations, or anything else!""")
+    """)
 
     model = "mistral-small-latest"
 
@@ -163,6 +167,9 @@ def sentiment_returnMostRelevantTopic(topics: list[str]) -> str:
         except SDKError as e:
             llmSemaphore.release()
             raise e
+        with open(sentimentLogFile, "a") as f:
+            f.write(f"Prompt: {topics}\n")
+            f.write(f"Response: {response.choices[0].message.content.strip()}\n")
         llmSemaphore.release()
         # The response should be a single line with the topic.
         topic = response.choices[0].message.content.strip()
@@ -180,35 +187,22 @@ def sentiment_aggregateSimilarTopics(topics: list[str]) -> list[str]:
     prompt: str = ""
 
     prompt = textwrap.dedent(f"""
-        Aggregate similar topics in a list, to avoid
-        redundancy, and return ONLY the list of aggregated topics.
+        Your task is to read a list of term that can contain
+        synonyms, and return a single word that represents the list.
+        Return ONLY a term. No comments, explanations, or anything else!
 
-        Example 1:
+        Example:
 
             List:
-                subscription
-                subscribed
-                subscriber
-
-            Your output:
-                subscriber
-
-            List 2:
-                subscription
-                subscribed
-                subscriber
-                reading
-                reader
-                read
+                disk
+                cd
+                album
+                record
                 
             Your output:
-                subscriber
-                reader                             
+                disk
 
-        RETURN ONLY THE FINAL LIST OF TOPICS. No comments,
-        explanations, or anything else!
-
-        Here is the list:
+        List:
         {topics}
         ---""")
 
@@ -257,33 +251,32 @@ def sentiment_parseScore(text: str, rating: int, topics: list[str]) -> dict:
 
     prompt = textwrap.dedent(f"""
             Your task is to
-            1) search a list of topics in a review text
-            2) calculate sentiment of each topic in the text as score -1, -0.5, 0, 0.5, 1
-            3) return the sentiment for each topic in the list as a JSON object.
+            1) search list of topics in a review text
+            2) calculate sentiment of each topic in text as score
+                -1 (very negative), 0 (neutral/not found), 1 (very positive).
+            3) return sentiments as JSON object. ONLY JSON. No comments, explanations, anything else.
 
-            Example text:
-            'This is a great CD. I love it.'
-            Example topics:
-            ['cd','cover']
-            Example output:
-            {{
-                "cd": 1,
-                "cover": 0
-            }}
+            Example 1:
+                text: 'Not bad CD, not great either. Score: 4'
+                Topics: ['cd','cover']
+                Output:
+                {{
+                    "cd": 0,
+                    "cover": 0
+                }}
 
             Example 2:
-                Text: 'an astounding amount of ads, and the cover is awful. Score: 1'
-                Topics: ['advertisement','cover']
-                Output: {{
-                    "ads": -1,
+                text: 'Gosh, the cd is... bombastic! But the cover is awful :-( Score: 3'
+                Topics: ['cd','cover']
+                Output:
+                {{
+                    "cd": 1,
                     "cover": -1
                 }}
 
-            Return ONLY AND EXCLUSIVELY a JSON. No comments,
-            explanations, or anything else.
-
+            ---
             TEXT:
-            {text}
+            {text}. Score: {rating}
             ---
             TOPICS:
             {topics}
@@ -308,6 +301,10 @@ def sentiment_parseScore(text: str, rating: int, topics: list[str]) -> dict:
                 except SDKError as e:
                     llmSemaphore.release()
                     raise e
+                with open(sentimentLogFile, "a") as f:
+                    f.write(f"Text: {text}\n")
+                    f.write(f"Topics: {topics}\n")
+                    f.write(f"Response: {response.choices[0].message.content.strip()}\n")
                 llmSemaphore.release()
                 # attempt to parse the response
                 try:
@@ -365,6 +362,8 @@ def sentimentCache_getSentimentAndAdjustedRating(text: str, original_rating: flo
                 topic_sentiments, adjusted_rating = sentimentCache_getSentimentAndAdjustedRating(text, original_rating, topics)
             else:
                 # Sentiment empty and not topics for sentiment analysis.
+                sentimentCache_updateOriginalRating(text, original_rating, original_rating)
+                sentimentCache_Save()
                 print("_", end="", flush=True)
 
     else:
