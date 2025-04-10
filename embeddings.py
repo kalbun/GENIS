@@ -33,20 +33,31 @@ class EmbeddingsManager:
             with open(self._embeddingsCacheFile, "wb") as f:
                 pickle.dump(self.embeddingsCache, f)
 
-    def is_relevant_topic(self, topic: str, threshold: float = 0.25) -> bool:
+    def is_relevant_topic(self, topic: str, referenceTopic: str, threshold: float = 0.25) -> bool:
+        """
+        Check if the topic is relevant to the reference topic based on their embeddings.
+        Args:
+            topic: str - the topic to check.
+            referenceTopic: str - the reference topic.
+            threshold: float - the threshold for relevance.
+        Returns:
+            bool: True if the topic is relevant, False otherwise.
+        """
         topic_emb = self.embeddingsCache.get(topic)
+        topic_ref__emb = self.embeddingsCache.get(referenceTopic)
         if topic_emb is None:
             return False
-        if np.linalg.norm(self.overallTopicEmbedding) == 0 or np.linalg.norm(topic_emb) == 0:
+        if np.linalg.norm(topic_ref__emb) == 0 or np.linalg.norm(topic_emb) == 0:
             return False
-        similarity = np.dot(self.overallTopicEmbedding, topic_emb) / (
-            np.linalg.norm(self.overallTopicEmbedding) * np.linalg.norm(topic_emb)
+        similarity = np.dot(topic_ref__emb, topic_emb) / (
+            np.linalg.norm(topic_ref__emb) * np.linalg.norm(topic_emb)
         )
         return similarity >= threshold
 
     def extract_relevant_topics(
         self,
         reviews: list[str],
+        referenceTopic: str,
         relevance_threshold: float = 0.25,
     ) -> tuple[list[str], list[str], list[str]]:
         """
@@ -54,6 +65,7 @@ class EmbeddingsManager:
 
         Args:
             reviews: List of reviews.
+            referenceTopic: Reference topic to compare against.
             relevance_threshold: minimum semantic similarity for topics to be
                 considered relevant.
         Returns:
@@ -66,7 +78,7 @@ class EmbeddingsManager:
         irrelevantReviews: list[str] = []
 
         for i, review in enumerate(reviews):
-            current_topics = [t for t in review.split() if self.is_relevant_topic(t, relevance_threshold)]
+            current_topics = [t for t in review.split() if self.is_relevant_topic(t, referenceTopic, relevance_threshold)]
             if len(current_topics) == 0:
                 irrelevantReviews.append(review)
             else:
@@ -78,33 +90,22 @@ class EmbeddingsManager:
 
     def clustering_topics(
         self,
-        reviews: list[str],
-        relevance_threshold: float = 0.25,
+        relevant_topics: list[str],
         cluster_size: int = 3,
         min_samples: int = 2,
+        min_topics: int = 4,
     ) -> list[tuple]:
         """
         Clusters the topics based on their embeddings and returns the most important clusters.
 
         Args:
-            reviews: List of reviews.
-            relevance_threshold: minimum semantic similarity for topics to be considered relevant.
+            relevant_topics: List of relevant topics.
             cluster_size: minimum size of clusters for HDBSCAN.
             min_samples: minimum number of samples in a cluster for HDBSCAN.
+            min_topics: minimum number of topics in a cluster to be considered important.
         Returns:
             list[tuple]: List of tuples containing cluster information.
         """
-        relevant_topics: list[str] = []
-        relevantReviews: list[str] = []
-        irrelevantReviews: list[str] = []
-
-        print(f"Creating relevant clusters (ST={relevance_threshold}, HS={cluster_size}, HM={min_samples})...")
-        print("One dot = 1000 reviews", end="", flush=True)
-
-        relevant_topics, relevantReviews, irrelevantReviews = self.extract_relevant_topics(
-            reviews,relevance_threshold
-        )
-        print(f"\n{len(reviews)} reviews of which {len(irrelevantReviews)} irrelevant.")
 
         topic_counts = Counter(relevant_topics)
         topics_list = list(topic_counts.keys())
@@ -113,7 +114,7 @@ class EmbeddingsManager:
         # Apply PCA to reduce dimensionality (keeping 90% of the variance)
         pca = PCA(n_components=0.9)
         reduced_vectors = pca.fit_transform(embeddings)
-        self.overallTopicEmbedding = pca.transform(np.array([self.overallTopicEmbedding]))
+#        self.overallTopicEmbedding = pca.transform(np.array([self.overallTopicEmbedding]))
         del pca
 
         clusterer = hdbscan.HDBSCAN(
@@ -129,7 +130,13 @@ class EmbeddingsManager:
                     for label in set(labels) if label != -1}
         topic_embeddings = {topic: emb for topic, emb in zip(topics_list, reduced_vectors)}
 
-        most_important_clusters = self.get_most_important_clusters(clusters, topic_counts, centroids, topic_embeddings, n=10)
+        most_important_clusters = self.get_most_important_clusters(
+            clusters,
+            topic_counts, 
+            centroids, 
+            topic_embeddings, 
+            minTopics=min_topics
+        )
         return most_important_clusters
 
     @staticmethod
@@ -137,7 +144,23 @@ class EmbeddingsManager:
         distances = cdist([centroid], np.array([topic_embeddings[t] for t in topics]), metric='euclidean')
         return topics[np.argmin(distances)]
 
-    def get_most_important_clusters(self, clusters, topic_counts, centroids, topic_embeddings, n) -> list[tuple]:
+    def get_most_important_clusters(
+            self,
+            clusters: dict[int, list[str]], 
+            topic_counts: dict[str, int],
+            centroids: dict[int, np.ndarray],
+            topic_embeddings: dict[str, np.ndarray],
+            minTopics: int = 7
+        ) -> list[tuple]:
+        """
+        Sort the clusters by their frequency and return the most important ones.
+        :param clusters: the clusters to sort
+        :param topic_counts: the counts of each topic
+        :param centroids: the centroids of each cluster
+        :param topic_embeddings: the embeddings of each topic
+        :param n: minimum number of topics in a cluster to be considered important
+        :return: the most important clusters
+        """
         cluster_frequencies = {}
         for label, topics in clusters.items():
             total_frequency = sum(topic_counts[t] for t in topics)
@@ -149,8 +172,9 @@ class EmbeddingsManager:
                 "n_aspects": len(topics),
                 "frequency": total_frequency
             }
+        # Sort clusters by frequency and return those containing at least n topics
         sorted_clusters = sorted(cluster_frequencies.items(), key=lambda x: x[1]["frequency"], reverse=True)
-        return sorted_clusters[:n]
+        return [cluster for cluster in sorted_clusters if cluster[1]['frequency'] > minTopics]
 
     def describe_general_topic(self, topic: str) -> str:
         """
@@ -185,38 +209,26 @@ class EmbeddingsManager:
             response = topic  # Fallback to the original topic if there's an error
         return response
 
-    def cacheTopicEmbeddings(self, preprocessed_reviews: list[str], topic_general: str):
+    def cacheTopicEmbeddings(self, bagOfWords: list[str]) -> None:
         """
-        Calculate the topic embeddings for the given reviews and put them in the cache.
-        The calculation executes these steps:
-        1. Extract topics from the reviews creating a list of unique terms.
-        2. Check if the topics are already in the cache.
-        3. If not, calculate the embeddings for the topics and the general topic.
-        4. Save the embedding in the cache.
+        Calculate the topic embeddings for the given terms and put them in the cache.
+        For each topic, the function checks if the embedding is already cached and
+        calculates it if not.
 
-        :param preprocessed_reviews: List of preprocessed reviews.
-        :param topic_general: General topic to be used for embedding.
+        :param bagOfWords: List of terms to calculate the embeddings for.
         :return: None
         """
-        extracted: list[str] = []
         new_count: int = 0
 
-        print("Extracting topics...", end="", flush=True)
-        for review in preprocessed_reviews:
-            extracted.extend(review.split())
-        extracted = sorted(set(extracted))
-        print(f"{len(extracted)} unique topics")
+        bagOfWords = list(set(bagOfWords))
+        print(f"{len(bagOfWords)} unique topics")
 
         # Reload cache in case it changed externally
         self._load_cache()
         new_count = 0
-        for topic in extracted:
+        for topic in bagOfWords:
             if topic not in self.embeddingsCache:
                 new_count += 1
-        if topic_general not in self.embeddingsCache:
-            new_count += 1
-        else:
-            self.overallTopicEmbedding = self.embeddingsCache[topic_general]
 
         if new_count == 0:
             print("All embeddings already cached")
@@ -228,16 +240,14 @@ class EmbeddingsManager:
         print("Loading transformer model...")
         emb_model = SentenceTransformer('all-MiniLM-L6-v2')
         print("Calculating embeddings...", end="", flush=True)
-        self.overallTopicEmbedding = emb_model.encode(topic_general)
-        self.embeddingsCache[topic_general] = self.overallTopicEmbedding
 
         new_count = 0
-        for i, topic in enumerate(extracted):
+        for i, topic in enumerate(bagOfWords):
             if topic not in self.embeddingsCache:
                 self.embeddingsCache[topic] = emb_model.encode(topic)
                 new_count += 1
             if i and i % 1000 == 0:
                 print(".", end="", flush=True)
                 self._save_cache()
-        print(f" done (new embeddings: {new_count} over {len(extracted)})")
+        print(f" done (new embeddings: {new_count} over {len(bagOfWords)})")
         self._save_cache()
