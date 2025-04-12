@@ -14,7 +14,8 @@ from sentiments import (
     sentimentCache_init,
     sentimentCache_getSentimentAndAdjustedRating,
     sentiment_aggregateSimilarTopics,
-    sentiment_returnMostRelevantTopic
+    sentiment_returnMostRelevantTopic,
+    sentiment_getTypicalTopics
 )
 
 embeddingManager: EmbeddingsManager = None
@@ -92,8 +93,15 @@ Files are stored in the following structure (see README.md for details):
         original_reviews: list[dict] = []
         original_indices: set[int] = set()
         preprocessed_reviews: list[str] = []
+        typicalTopics: list[str] = []
         bagOfWords: list[str] = []
         counter: int = 0
+        specific_topics: list[str] = []
+        generic_topics: list[str] = []
+        irrelevantReviews: list[str] = []
+        generic_clusters: list[tuple] = []
+        specific_clusters: list[tuple] = []
+        aggregated_clusters: list[tuple] = []
 
         print(f"Run {run + 1}/{args.runs}")
         # Load a random sample of reviews from the file, preprocess them, then
@@ -107,17 +115,12 @@ Files are stored in the following structure (see README.md for details):
         bagOfWords = [term for review in preprocessed_reviews for term in review.split()]
         # add specific and general topics to the bag of words
         bagOfWords.extend([topicGeneral])
+        typicalTopics = sentiment_getTypicalTopics(topicGeneral)
+        bagOfWords.extend(typicalTopics)
         bagOfWords.extend("purchase")
         print(" completed.")
         # Cache the embeddings of the words found in the reviews
         embeddingManager.cacheTopicEmbeddings(bagOfWords)
-
-        specific_topics: list[str] = []
-        generic_topics: list[str] = []
-        irrelevantReviews: list[str] = []
-        generic_clusters: list[tuple] = []
-        specific_clusters: list[tuple] = []
-        aggregated_clusters: list[tuple] = []
 
         # Extract the topics semantically related to the general topic of the reviews.
         print(f"Extracting review-specific topics (similarity threshold {args.threshold})")
@@ -127,36 +130,40 @@ Files are stored in the following structure (see README.md for details):
             relevance_threshold=args.threshold,
         )
         counter += len(irrelevantReviews)
-        # Cluster topics based on embeddings calculated during pre-processing
-        print(f"Creating relevant clusters (HS={args.hcluster}, HM={args.hsample})...")
-        specific_clusters = embeddingManager.clustering_topics(
-            relevant_topics=specific_topics,
-            cluster_size=args.hcluster,
-            min_samples=args.hsample,
-            min_topics=5
-        )
-
-        # Now do the same for the purchase topic, but instead of using all the reviews,
-        # we use only the reviews not matching the general topic.
-        print(f"Extracting general topics from reviews not matching the reference topic")
         generic_topics, _, irrelevantReviews = embeddingManager.extract_relevant_topics(
-            reviews=irrelevantReviews,
+            reviews=preprocessed_reviews,
             referenceTopic="purchase",
             relevance_threshold=args.threshold,
         )
         counter += len(irrelevantReviews)
-        print(f"Creating relevant clusters (HS={args.hcluster}, HM={args.hsample})...")
-        generic_clusters = embeddingManager.clustering_topics(
-            relevant_topics=generic_topics,
-            cluster_size=args.hcluster,
-            min_samples=args.hsample,
-            min_topics=3
-        )
+        # Cluster topics based on embeddings calculated during pre-processing
+        if len(specific_topics) > 0:
+            print(f"Creating relevant clusters (HS={args.hcluster}, HM={args.hsample})...")
+            specific_clusters = embeddingManager.clustering_topics(
+                relevant_topics=specific_topics,
+                cluster_size=args.hcluster,
+                min_samples=args.hsample,
+    #            min_topics=5
+            )
+
+        # Now do the same for the purchase topic, but instead of using all the reviews,
+        # we use only the reviews not matching the general topic.
+        if 1:
+#        for topic in typicalTopics:
+            if len(generic_topics) > 0:
+                generic_clusters = embeddingManager.clustering_topics(
+                    relevant_topics=generic_topics,
+                    cluster_size=args.hcluster,
+                    min_samples=args.hsample,
+#                    min_topics=3
+                )
+        
+        aggregated_clusters = generic_clusters + specific_clusters
         print(f"Irrelevant reviews {counter}/{len(preprocessed_reviews)}.")
 
-        aggregated_clusters = specific_clusters
 #        aggregated_clusters = generic_clusters + specific_clusters
 #        specific_topics.extend(generic_topics)
+
 
         # Recalculate the centroids. Those obtained by calculating the
         # average of the embeddings of the words in the cluster don't
@@ -240,7 +247,12 @@ Files are stored in the following structure (see README.md for details):
 #            original_ratings: np.ndarray = np.array([t[1] for t in topicsAndDetails if t[2] != []])
 #            adjusted_ratings: np.ndarray = np.array([result[1] for result in calculatedSentiments if result[0] != {}])
             original_ratings: np.ndarray = np.array([t[1] for t in topicsAndDetails])
-            adjusted_ratings: np.ndarray = np.array([result[1] for result in calculatedSentiments])
+            adjusted_ratings: np.ndarray = np.zeros(len(original_ratings))
+            for idx, result in enumerate(calculatedSentiments):
+                score: float = 0.0
+                for value in result[0]:
+                    score += result[0][value]
+            adjusted_ratings[idx] = score
             # This operation allows to change the strength of the adjustment
             adjustements: np.ndarray = (adjusted_ratings - original_ratings)
             adjusted_ratings = original_ratings + adjustements * 0.5
