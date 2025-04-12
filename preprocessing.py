@@ -95,66 +95,82 @@ def preprocess_reviews(reviews: list[str]) -> list[str]:
     spell_checker: SpellChecker = SpellChecker()
     spell_checker.word_frequency.load_words(stop_words)
 
+    tokens: list[list[str]] = []
+    pos_tags: list[tuple[str, str]] = []
+
+    bagOfWords: dict[str, int] = {}
+
+    _CORRECTION_CACHE_FILE = os.path.join(os.path.dirname(__file__), "correction_cache.json")
+    if os.path.exists(_CORRECTION_CACHE_FILE):
+        try:
+            with open(_CORRECTION_CACHE_FILE, "r", encoding="utf-8") as f:
+                correction_cache = json.load(f)
+        except Exception:
+            pass
+
+    # Set lowercase, remove duplicates and sort the reviews
+    reviews = [sentence.lower() for sentence in reviews]
+    # remove punctuation and special characters
+    reviews = sorted(set([re.sub(r'\W+', ' ', sentence) for sentence in reviews]))
+    # create a list of unique words from the reviews
+    bagOfWords = sorted(set({word for sentence in reviews for word in sentence.split()}))
+    # Now do spell correction for the bag of words
+    for word in bagOfWords:
+        if word not in correction_cache:
+            corrected_word: str = spell_checker.correction(word)
+            if corrected_word != None and corrected_word != word:
+                correction_cache[word] = corrected_word
+    del bagOfWords
+    # Save the correction cache to file
+    try:
+        with open(_CORRECTION_CACHE_FILE, "wt", encoding="utf-8") as f:
+            json.dump(correction_cache, f, ensure_ascii=False, indent=4)
+    except Exception:
+        pass
+
+    updated_reviews = []
+    for review in reviews:
+        updates_sentence: str = ""
+        # Do grammar spell word by word, replacing on the fly
+        for word in review.split():
+            # also remove words with digits and punctuation
+            if any(char.isdigit() for char in word):
+                continue
+            if word in correction_cache:
+                word = correction_cache[word]
+            updates_sentence += word + " "
+        updated_reviews.append(updates_sentence.strip())
+    reviews = updated_reviews
+
     for idx, review in enumerate(reviews):
-        review = review.lower() if isinstance(review, str) else " "
         if idx % 1000 == 0:
             print(".", end="", flush=True)
-        sentences = [review]
-        for sentence in sentences:
-            # Check if the sentence is already in the cache
-            if sentence in _PREPROCESSING_CACHE:
-                preprocessed_sentences.append(_PREPROCESSING_CACHE[sentence])
-                continue
-            # Tokenize the sentence
-            tokens = word_tokenize(sentence)
-            # Remove punctuation, non-alphanumerics, words with digits, and stop words in one pass.
-            cleaned_tokens = []
-            for token in tokens:
-                if token.isalnum():
-                    token = re.sub(r'\W+', '', token)
-                    if not any(char.isdigit() for char in token) and token not in stop_words:
-                        cleaned_tokens.append(token)
-            # Remove duplicates
-            unique_tokens = sorted(set(cleaned_tokens))
-            
-            # Correct spelling on unique tokens
-            corrected_tokens: list[str] = []
-            for token in unique_tokens:
-                if 1 and (token not in correction_cache):
-                    correctedToken: str = spell_checker.correction(token)
-                    if correctedToken != None:
-                        correction_cache[token] = correctedToken
-                        token = correctedToken
-                corrected_tokens.append(token)
+        # Check if the sentence is already in the cache
+        if review in _PREPROCESSING_CACHE:
+            preprocessed_sentences.append(_PREPROCESSING_CACHE[review])
+            continue
+        # Tokenize the sentence, apply POS tagging and lemmatization
+        tokens = word_tokenize(review)
+        pos_tags = pos_tag(tokens)
+        lemmatized_tokens = [lemmatizer.lemmatize(word, get_wordnet_pos(tag))
+                            for word, tag in pos_tags]
 
-            # Apply POS tagging and lemmatization
-            pos_tags = pos_tag(corrected_tokens)
-            lemmatized_tokens = [lemmatizer.lemmatize(word, get_wordnet_pos(tag))
-                                for word, tag in pos_tags]
-#            lemmatized_tokens = sorted(set(lemmatized_tokens))  # Remove duplicates
+        # Keep only nouns and adjectives
+        filtered_tokens = [
+            word for word,tag in zip(lemmatized_tokens,pos_tags)
+            if (tag[1].startswith('N')or tag[1].startswith('V'))
+            and word not in stop_words
+            and len(word) > 1
+        ]
+        filtered_tokens = list(set(filtered_tokens))
 
-            # Keep only nouns and adjectives
-            pos_tags = pos_tag(lemmatized_tokens)
-            filtered_tokens = [
-                word for word, pos in pos_tags
-                if
-                    pos.startswith('NN')
-                    or
-                    pos.startswith('JJ')
-            ]
-
-            # Remove short words and stop words
-            final_tokens = [word for word in filtered_tokens
-                            if len(word) > 1 and word not in stop_words]
-            final_tokens = sorted(set(final_tokens))  # Final deduplication
-
-            # Rebuild the sentence
-            filtered_sentence = " ".join(final_tokens)
-            # Save to cache
-            _PREPROCESSING_CACHE[sentence] = filtered_sentence
-            preprocessingCache_save()
-            # Append to the list of preprocessed sentences
-            preprocessed_sentences.append(filtered_sentence)
+        # Rebuild the sentence
+        filtered_sentence = " ".join(filtered_tokens)
+        # Save to cache
+        _PREPROCESSING_CACHE[review] = filtered_sentence
+        preprocessingCache_save()
+        # Append to the list of preprocessed sentences
+        preprocessed_sentences.append(filtered_sentence)
     return preprocessed_sentences
 
 def load_reviews(file_path: str, max_reviews: int, label_text: str, label_rating: str, seed: int) -> tuple[list[dict], set[int]]:
