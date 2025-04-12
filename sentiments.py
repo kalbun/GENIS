@@ -232,6 +232,53 @@ def sentiment_aggregateSimilarTopics(topics: list[str]) -> list[str]:
 
     return aggregated_sentiments
 
+def sentiment_getTypicalTopics(generalTopic: str) -> list[str]:
+    """
+    Return a list of topics typically associated with the given general topic.
+
+    :param generalTopic: the general topic to check
+    :return: the list of typical topics associated with the general topic
+    """
+    associatedSentiments: list[str] = []
+    prompt: str = ""
+
+    prompt = textwrap.dedent(f"""
+        Task: return 5 terms typically associated with given general topic.
+        Return ONLY term. No comments, explanations, or anything else!
+
+        Example:
+            general topic: 'digital music'
+            Your output:
+                ['music', 'sound', 'orchestra', 'band', 'concert']
+
+        general topic:
+        {generalTopic}
+        """)
+
+    model = "mistral-small-latest"
+
+    if (llmSemaphore.acquire()):
+        try:
+            response = genAI_Client.chat.complete(
+                model = model,
+                temperature=0.0,
+                messages = [
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    },
+                ]
+            )
+        except SDKError as e:
+            llmSemaphore.release()
+            raise e
+        llmSemaphore.release()
+        # attempt to parse the response. Items should be separated by newlines
+        # and should be put in a list.
+        associatedSentiments = response.choices[0].message.content.strip().split("\n")
+        associatedSentiments.append(generalTopic)
+
+    return associatedSentiments
 
 def sentiment_parseScore(text: str, rating: int, topics: list[str]) -> dict:
     """
