@@ -33,6 +33,44 @@ class EmbeddingsManager:
             with open(self._embeddingsCacheFile, "wb") as f:
                 pickle.dump(self.embeddingsCache, f)
 
+    def getSimilarityDistance(self, topic1: list[float], topic2: list[float]) -> float:
+        """
+        Calculate the cosine similarity distance between two topics.
+        Args:
+            topic1: list[float] - the first topic embedding.
+            topic2: list[float] - the second topic embedding.
+        Returns:
+            float: the cosine similarity distance.
+        """
+        if np.linalg.norm(topic1) == 0 or np.linalg.norm(topic2) == 0:
+            return 1.0
+        similarity = np.dot(topic1, topic2) / (np.linalg.norm(topic1) * np.linalg.norm(topic2))
+        return 1 - similarity
+
+    def getEmbedding(self, topic: str) -> list[float]:
+        """
+        Get the embedding for a given topic. If the topic is not in the cache, it returns None.
+        Args:
+            topic: str - the topic to get the embedding for.
+        Returns:
+            list[float]: the embedding of the topic.
+        """
+        return self.embeddingsCache.get(topic, None)
+
+    def getSimilarityDistanceS(self, topic1: str, topic2: str) -> float:
+        """
+        Calculate the cosine similarity distance between two topics.
+        Args:
+            topic1: str - the first topic.
+            topic2: str - the second topic.
+        Returns:
+            float: the cosine similarity distance.
+        """
+        if topic1 not in self.embeddingsCache or topic2 not in self.embeddingsCache:
+            return 1.0
+        return self.getSimilarityDistance(self.embeddingsCache[topic1], self.embeddingsCache[topic2])
+
+
     def is_relevant_topic(self, topic: str, referenceTopic: str, threshold: float = 0.25) -> bool:
         """
         Check if the topic is relevant to the reference topic based on their embeddings.
