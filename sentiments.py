@@ -176,6 +176,57 @@ def sentiment_returnMostRelevantTopic(topics: list[str]) -> str:
 
     return topic
 
+def sentiment_topicsFromSentence(sentence: str) -> list[str]:
+    """
+    Return a list of topics from the given sentence.
+    The topics extraction is based on the LLM model.
+
+    :param sentence: the sentence to check
+    :return: the list of topics from the sentence
+    """
+    topics: list[str] = []
+    prompt: str = ""
+
+    prompt = textwrap.dedent(f"""
+        Read *Sentence*. Return 1 or 2 or 3 SNGLE NOUNS to describe it.
+        Nouns newline separated. No other text, no comments, no explanations.
+
+        Example:
+            *Sentence*: 'The cd is... bombastic! But the cover is awful :-('
+            You return:
+                cd
+                cover
+        ---
+        *Sentence*:
+        {sentence}
+        """)
+
+    model = "mistral-small-latest"
+
+    if (llmSemaphore.acquire()):
+        try:
+            response = genAI_Client.chat.complete(
+                model = model,
+                temperature=0.0,
+                messages = [
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    },
+                ]
+            )
+        except SDKError as e:
+            llmSemaphore.release()
+            raise e
+        llmSemaphore.release()
+        # attempt to parse the response. Items should be separated by newlines
+        aggregated_sentiments = response.choices[0].message.content.strip().split("\n")
+        # Remove empty strings and strip whitespace from each item
+        topics = [item.strip() for item in aggregated_sentiments if item]
+
+    return topics
+
+
 def sentiment_aggregateSimilarTopics(topics: list[str]) -> list[str]:
     """
     Aggregate similar topics in the sentiment dictionary.
