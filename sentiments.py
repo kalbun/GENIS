@@ -103,12 +103,8 @@ def sentimentCache_updateSentiment(item: str, topic_sentiments: dict):
     global sentimentCache, sentimentCacheSemaphore
 
     if sentimentCacheSemaphore.acquire():
-        if item in sentimentCache:
-            # If item already exists, update its sentiments
-            sentimentCache[item]['sentiments'] = topic_sentiments
-        else:
-            # If item does not exist, create it with the provided sentiments
-            sentimentCache_CreateItem(item, topic_sentiments)
+        # Update or create the item with the provided sentiments
+        sentimentCache[item] = {'sentiments': topic_sentiments}
         sentimentCacheSemaphore.release()
 
 def sentimentCache_updateOriginalRating(item: str, originalRating: float, newRating: float):
@@ -188,16 +184,32 @@ def sentiment_topicsFromSentence(sentence: str) -> list[str]:
     prompt: str = ""
 
     prompt = textwrap.dedent(f"""
-        Read *Sentence*. Return 1 or 2 or 3 SNGLE NOUNS to describe it.
-        Nouns newline separated. No other text, no comments, no explanations.
+        Read *Sentence* for emotional content.
+        - return a list of newline-separated nouns associated with strong sentiments, empty string if no sentiment.
+        - Return single word. 'cover' is OK, 'cd cover' is not.
+        - Return ONLY nouns. No adjectives, verbs, adverbs, etc.
+        - No comments, explanations, or anything else!
 
-        Example:
-            *Sentence*: 'The cd is... bombastic! But the cover is awful :-('
-            You return:
-                cd
+        Example with one strong sentiment (decent is a mild sentiment):
+            *Sentence*:
+                The cd is decent but the shipping was horrible!
+            Answer:
                 cover
-        ---
-        *Sentence*:
+
+        Example with two strong sentiments:
+            *Sentence*:
+                The cd is... bombastic!! but the shipping was horrible!
+            Answer:
+                cd
+                shipping
+
+        Example with no sentiment (good is a mild sentiment):
+            *Sentence*:
+                The cd is decent
+            Answer (nothing, empty string):
+                
+
+        Here is *Sentence*:
         {sentence}
         """)
 
@@ -219,11 +231,7 @@ def sentiment_topicsFromSentence(sentence: str) -> list[str]:
             llmSemaphore.release()
             raise e
         llmSemaphore.release()
-        # attempt to parse the response. Items should be separated by newlines
-        aggregated_sentiments = response.choices[0].message.content.strip().split("\n")
-        # Remove empty strings and strip whitespace from each item
-        topics = [item.strip() for item in aggregated_sentiments if item]
-
+        topics = response.choices[0].message.content.strip().split("\n")
     return topics
 
 
@@ -331,11 +339,59 @@ def sentiment_getTypicalTopics(generalTopic: str) -> list[str]:
 
     return associatedSentiments
 
-def sentiment_parseScore(text: str, rating: int, topics: list[str]) -> dict:
+def assignGradeToReview(review: str) -> int:
+    """
+    Assign a grade from 1 to 10 to the review, using a zero-shot
+    LLM questioning. The grade is based only on the review text,
+    because the LLM does not know the rating.
+
+    :param review: the review text
+    :param rating: the rating of the review
+    """
+    score: int = 0
+    retry_counter: int = 0
+    model: str = "mistral-small-latest"
+    prompt: str = textwrap.dedent(f"""
+            Read this review and assign a grade from 1 to 10.
+            Return ONLY the grade. No comments, explanations, anything else!
+            ---
+            {review}""")
+
+    while (retry_counter < 3):
+        try:
+            if (llmSemaphore.acquire()):
+                try:
+                    response = genAI_Client.chat.complete(
+                        model = model,
+                        temperature=0.0,
+                        messages = [
+                            {
+                                "role": "user",
+                                "content": prompt,
+                            },
+                        ]
+                    )
+                except SDKError as e:
+                    llmSemaphore.release()
+                    raise e
+                llmSemaphore.release()
+                score = int(response.choices[0].message.content.strip())
+        except SDKError:
+            retry_counter += 1
+            continue
+        except Exception:
+            # exit
+            print("E", end="", flush=True)
+            break # empty output
+
+    return score
+
+
+
+def sentiment_parseScore(text: str, topics: list[str]) -> dict:
     """
     Parse the sentiment of the review text using the LLM model.
     :param text: the review text
-    :param rating: the original rating of the review
     :param topics: the topics to consider for sentiment analysis
     :return: the sentiments of the review text as a dictionary
     """
@@ -355,7 +411,7 @@ def sentiment_parseScore(text: str, rating: int, topics: list[str]) -> dict:
             3) return sentiments as JSON object. ONLY JSON. No comments, explanations, anything else.
 
             Example 1:
-                text: 'Not bad CD, not great either. Score: 4'
+                text: 'Not bad CD, not great either'
                 Topics: ['cd','cover']
                 Output:
                 {{
@@ -364,7 +420,7 @@ def sentiment_parseScore(text: str, rating: int, topics: list[str]) -> dict:
                 }}
 
             Example 2:
-                text: 'Gosh, the cd is... bombastic! But the cover is awful :-( Score: 3'
+                text: 'Gosh, the cd is... bombastic! But the cover is awful :-('
                 Topics: ['cd','cover']
                 Output:
                 {{
@@ -374,13 +430,23 @@ def sentiment_parseScore(text: str, rating: int, topics: list[str]) -> dict:
 
             ---
             TEXT:
-            {text}. Score: {rating}
+            {text}.
             ---
             TOPICS:
             {topics}
             ---""")
 
     model = "mistral-small-latest"
+
+    # if the text is cached, retrieve the sentiment from the cache
+    # and return it
+    if text in sentimentCache:
+        cached_data = sentimentCache[text]
+        if 'sentiments' in cached_data:
+            # if sentiments are cached, check if adjusted rating is cached
+            output = cached_data['sentiments']
+            print("C", end="", flush=True)
+            return output
 
     while (retry_counter < 3):
         try:
@@ -409,6 +475,9 @@ def sentiment_parseScore(text: str, rating: int, topics: list[str]) -> dict:
                     match = re.search(r'\{.*\}', response.choices[0].message.content, re.DOTALL)
                     if match:
                         output = json.loads(match.group(0))
+                        # update the sentiment cache with the parsed output
+                        sentimentCache_updateSentiment(text, output)
+                        sentimentCache_Save()
                 except json.JSONDecodeError:
                     print("J", end="", flush=True)
                 break
