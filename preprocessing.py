@@ -9,6 +9,7 @@ from nltk import pos_tag
 from nltk.corpus import stopwords, wordnet
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
+from contractions import fix
 
 # Download NLTK resources if missing
 nltk.download('punkt', quiet=True)
@@ -16,18 +17,18 @@ nltk.download('stopwords', quiet=True)
 nltk.download('wordnet', quiet=True)
 nltk.download('averaged_perceptron_tagger', quiet=True)
 
+
 class ReviewPreprocessor:
     """
-    Class for preprocessing and correcting review text.
-    
-    Provides methods to load and save caches for tokenization and correction,
-    preprocess reviews by tokenizing, removing stop words, lemmatizing, and perform spell correction,
-    and load reviews from a file.
+    A class to preprocess review texts by tokenizing, lemmatizing,
+    correcting contractions, handling spelling, and filtering tokens.
+
+    It supports saving and loading both preprocessing and correction caches.
     """
 
     def __init__(self, file_prefix: str):
         """
-        Initialize the preprocessor with cache files based on a file prefix.
+        Initialize the preprocessor with file paths for caching results.
 
         Args:
             file_prefix (str): The prefix for the cache file names.
@@ -36,13 +37,14 @@ class ReviewPreprocessor:
         self.preprocessing_cache_file: str = file_prefix + "_preprocessing_cache.json"
         self.correction_cache: dict = {}
         self.correction_cache_file: str = file_prefix + "_correction_cache.json"
-        self._load_preprocessing_cache()
-        self._load_correction_cache()
+
+        self.LoadPreprocessingCache()
+        self.LoadCorrectionCache()
 
     # ---------------------- Cache Methods ---------------------- #
-    def _load_preprocessing_cache(self) -> dict:
+    def LoadPreprocessingCache(self) -> dict:
         """
-        Loads the preprocessing cache from disk if the file exists.
+        Load the preprocessing cache from disk if it exists.
 
         Returns:
             dict: The loaded preprocessing cache.
@@ -55,9 +57,9 @@ class ReviewPreprocessor:
                 pass
         return self.preprocessing_cache
 
-    def _save_preprocessing_cache(self):
+    def SavePreprocessingCache(self):
         """
-        Saves the current preprocessing cache to disk.
+        Save the current preprocessing cache to disk.
         """
         try:
             with open(self.preprocessing_cache_file, "w", encoding="utf-8") as f:
@@ -65,9 +67,9 @@ class ReviewPreprocessor:
         except Exception:
             pass
 
-    def _load_correction_cache(self) -> dict:
+    def LoadCorrectionCache(self) -> dict:
         """
-        Loads the correction cache from disk if the file exists.
+        Load the correction cache from disk if it exists.
 
         Returns:
             dict: The loaded correction cache.
@@ -80,25 +82,59 @@ class ReviewPreprocessor:
                 pass
         return self.correction_cache
 
-    def _save_correction_cache(self):
+    def SaveCorrectionCache(self):
         """
-        Saves the current correction cache to disk.
+        Save the current correction cache to disk, sorting the keys to ensure consistency.
         """
         try:
+            self.correction_cache = dict(sorted(self.correction_cache.items()))
             with open(self.correction_cache_file, "w", encoding="utf-8") as f:
                 json.dump(self.correction_cache, f, ensure_ascii=False, indent=4)
         except Exception:
             pass
 
-    # ---------------------- Preprocessing Methods ---------------------- #
-    @staticmethod
-    def _get_wordnet_pos(tag: str) -> str:
+    # ---------------------- Cache Update Methods ---------------------- #
+    def AddSubitemToReviewCache(self, review: str, key: str, value) -> None:
         """
-        Convert POS tag to WordNet POS tag.
+        Add or update a sub-item in the preprocessing cache for a given review.
+
+        This method allows you to store additional computed data (such as bigrams or nouns)
+        into the cache.
+
+        Args:
+            review (str): The review key in the cache.
+            key (str): The sub-item key to add/update.
+            value: The value to associate with the sub-item.
+        """
+        if review in self.preprocessing_cache:
+            self.preprocessing_cache[review][key] = value
+        else:
+            self.preprocessing_cache[review] = {key: value}
+        self.SavePreprocessingCache()
+
+    def AddSubitemsToReviewCache(self, review: str, subitems: dict) -> None:
+        """
+        Add or update multiple sub-items in the preprocessing cache for a given review.
+
+        Args:
+            review (str): The review key in the cache.
+            subitems (dict): A dictionary of sub-items to add/update.
+        """
+        if review in self.preprocessing_cache:
+            self.preprocessing_cache[review].update(subitems)
+        else:
+            self.preprocessing_cache[review] = subitems
+        self.SavePreprocessingCache()
+
+    # ---------------------- Helper Methods ---------------------- #
+    @staticmethod
+    def GetWordnetPos(tag: str) -> str:
+        """
+        Convert POS tag to format recognized by WordNet.
 
         Args:
             tag (str): The POS tag to convert.
-        
+
         Returns:
             str: The corresponding WordNet POS tag.
         """
@@ -112,125 +148,141 @@ class ReviewPreprocessor:
             return wordnet.ADV
         return wordnet.NOUN
 
-    def preprocess_reviews(self, reviews: dict[str, float]) -> tuple[dict[str, dict], dict[str, float]]:
+    # ---------------------- Preprocessing Methods ---------------------- #
+    def PreprocessReviews(self, reviews: dict[str, float]) -> dict[str, dict]:
         """
-        Preprocess reviews by tokenizing, removing stop words,
-        and lemmatizing. Also applies spell correction.
+        Preprocess review texts by correcting, tokenizing, lemmatizing, and spelling correction.
 
-        The method returns two dictionaries:
-            - preprocessed_reviews: with tokens and scores.
-            - corrected_reviews: with the updated sentences after spell checking.
+        The method applies the following steps:
+        1. Correct contractions and perform lowercasing.
+        2. Remove unwanted characters and extra whitespace.
+        3. Generate a correction cache for misspelled words.
+        4. Tokenize texts, apply POS tagging and lemmatization.
+        5. Filter tokens by stopwords, token length, and word type.
+        6. Update and save caches accordingly.
 
         Args:
-            reviews (dict[str, float]): Reviews to preprocess with their scores.
-        
+            reviews (dict[str, float]): Dictionary where each key is a review text
+                                        and value is its associated score.
+
         Returns:
-            tuple: Preprocessed reviews and corrected reviews.
+            dict[str, dict]: Mapping of original review texts to their processed data.
         """
         preprocessed_reviews: dict[str, dict] = {}
-        corrected_reviews: dict[str, float] = {}
-        word_correction_cache: dict[str, str] = {}
 
-        # Initialize resources
+        # Initialize NLTK resources
         stop_words: set = set(stopwords.words('english'))
         lemmatizer: WordNetLemmatizer = WordNetLemmatizer()
         spell_checker: SpellChecker = SpellChecker()
         spell_checker.word_frequency.load_words(stop_words)
 
-        for review in reviews.keys():
-
-            if (review in self.correction_cache) and (self.correction_cache[review] == reviews[review]):
-                # If review already processed, use cached tokens
-                corrected_reviews[review] = reviews[review]
-                continue
-
-            # Remove punctuation and special characters
-            _reviews = {key.lower(): value for key, value in reviews.items()}
-            reviews = _reviews.copy()
-            _reviews = {re.sub(r'\W+', ' ', key): value for key, value in reviews.items()}
-            reviews = _reviews.copy()
-            del _reviews
-
-            # Create a sorted list of unique words from all review texts
-            bag_of_words = sorted(set(word for value in reviews.keys() for word in value.split()))
-        
-        # Perform spell correction for each word in the bag of words
-        for word in bag_of_words:
-            if word not in word_correction_cache:
-                corrected_word: str = spell_checker.correction(word)
-                if corrected_word is not None and corrected_word != word:
-                    word_correction_cache[word] = corrected_word
-        del bag_of_words
-
-        # Rebuild reviews with corrected words
-        for review, score in reviews.items():
-            updated_sentence: str = ""
-
-            # If review already processed, use cached tokens
-            if review in self.correction_cache:
-                corrected_reviews[review] = score
-                continue
-
-            # If review already processed, use cached tokens
-            # Replace word by word after correcting and removing words with digits
-            for word in review.split():
-                if any(char.isdigit() for char in word):
-                    continue
-                if word in word_correction_cache:
-                    word = word_correction_cache[word]
-                updated_sentence += word + " "
-            corrected_reviews[updated_sentence.strip()] = score
-            # Saves a corrected version of the review in the cache
-            self.correction_cache[updated_sentence.strip()] = score
-        reviews = corrected_reviews
-
-        # Process each corrected review
-        for idx, (review, score) in enumerate(reviews.items()):
-            if idx and (idx % 500 == 0):
-                print(".", end="", flush=True)
-            # If review already processed, use cached tokens
+        # Prepare cache: if review already exists in cache, use it; else, initialize it.
+        for review in reviews:
             if review in self.preprocessing_cache:
-                preprocessed_reviews[review] = self.preprocessing_cache[review]
                 continue
-            # Tokenize, POS tag, and lemmatize the review
-            tokens = word_tokenize(review)
-            pos_tags = pos_tag(tokens)
+            corrected_sentence = fix(review.lower())
+            corrected_sentence = (
+                corrected_sentence.replace("\n", ". ")
+                                  .replace("\r", ". ")
+                                  .replace("\t", " ")
+            )
+            corrected_sentence = re.sub(r'[^A-Za-z0-9.?!]+', ' ', corrected_sentence)
+            corrected_sentence = re.sub(r'([!?])\1+', r'\1', corrected_sentence)
+            corrected_sentence = corrected_sentence.replace("mr.", "mister") \
+                                                   .replace("ms.", "miss") \
+                                                   .replace("dr.", "doctor") \
+                                                   .replace("etc.", "et cetera") \
+                                                   .replace("e.g.", "for example") \
+                                                   .replace("i.e.", "that is")
+
+            self.preprocessing_cache[review] = {
+                'corrected': corrected_sentence,
+                'tokens': "",   # This field will be filled after tokenization.
+                'score': reviews[review]
+            }
+
+        # Build a bag of unique words from all corrected sentences, ignoring numeric tokens.
+        bag_of_words = sorted(
+            set(
+                word for review_data in self.preprocessing_cache.values()
+                for word in re.findall(r'\b\w+\b', review_data['corrected'])
+                if not any(char.isdigit() for char in word)
+            )
+        )
+
+        # Update correction cache with spell corrections.
+        for idx, word in enumerate(bag_of_words):
+            if idx and (idx % 100 == 0):
+                self.SaveCorrectionCache()
+            if word not in self.correction_cache:
+                corrected_word: str = spell_checker.correction(word)
+                self.correction_cache[word] = corrected_word if corrected_word and corrected_word != word else word
+        self.SaveCorrectionCache()
+
+        # Update the corrected sentence based on the correction cache.
+        for review in reviews:
+            corrected_sentence = self.preprocessing_cache[review]["corrected"]
+            self.preprocessing_cache[review]["corrected"] = " ".join(
+                self.correction_cache.get(word, word)
+                for word in corrected_sentence.split()
+#                if not any(char.isdigit() for char in word)
+            ).strip()
+
+        # Process reviews to obtain lemmatized tokens and filter based on POS and stopwords.
+        for idx, review in enumerate(reviews):
+            if idx and (idx % 100 == 0):
+                print(".", end="", flush=True)
+                self.SavePreprocessingCache()
+            # Process only if tokens have not been computed yet.
+            if self.preprocessing_cache[review]["tokens"]:
+                continue
+
+            pos_tags = pos_tag(word_tokenize(self.preprocessing_cache[review]["corrected"]))
             lemmatized_tokens = [
-                lemmatizer.lemmatize(word, self._get_wordnet_pos(tag))
+                lemmatizer.lemmatize(word, self.GetWordnetPos(tag))
                 for word, tag in pos_tags
             ]
-            # Filter tokens: keep only nouns and verbs, remove stop words and short words
+            # Filter out tokens that are not nouns, are stopwords or are too short.
             filtered_tokens = [
                 word for word, tag in zip(lemmatized_tokens, pos_tags)
-                if (tag[1].startswith('N') or tag[1].startswith('V'))
-                and word not in stop_words
-                and len(word) > 1
+                if tag[1].startswith('N') and word not in stop_words and len(word) > 1
             ]
-            # Remove duplicates by converting to a set and then back to list
+            # Ensure tokens are unique.
             filtered_tokens = list(set(filtered_tokens))
-            # Rebuild the sentence from filtered tokens
             filtered_sentence = " ".join(filtered_tokens)
-            # Save result in cache and to return dictionary
-            self.preprocessing_cache[review] = {"tokens": filtered_sentence, "score": score}
-            self._save_preprocessing_cache()
-            preprocessed_reviews[review] = {"tokens": filtered_sentence, "score": score}
-        return preprocessed_reviews, corrected_reviews
+            self.preprocessing_cache[review]["tokens"] = filtered_sentence
+
+        self.SavePreprocessingCache()
+
+        # Return only preprocessed reviews that exist in the original input.
+        preprocessed_reviews = {
+            review: self.preprocessing_cache[review]
+            for review in self.preprocessing_cache.keys()
+            if review in reviews.keys()
+        }
+
+        return preprocessed_reviews
 
     # ---------------------- Review Loader ---------------------- #
-    def load_reviews(self, file_path: str, max_reviews: int, label_text: str, label_rating: str, seed: int) -> tuple[list[dict], set[int]]:
+    def LoadReviews(self, file_path: str, max_reviews: int,
+                    label_text: str, label_rating: str, seed: int) -> tuple[list[dict], set[int]]:
         """
-        Load reviews from a file and return a list of dictionaries containing review text and overall rating.
-        Also returns the set of random indices corresponding to selected reviews.
+        Load reviews from a file and select a random subset.
+
+        Reads the file line by line to count total lines, selects random indices,
+        and then parses and filters the lines to load reviews based on the given labels.
 
         Args:
-            file_path (str): Path to the file with reviews.
-            max_reviews (int): Maximum number of reviews to load.
-            label_text (str): Field name for review text.
-            label_rating (str): Field name for review rating.
-            seed (int): Seed for random number generation.
+            file_path (str): Relative path to the file containing review JSON lines.
+            max_reviews (int): Maximum number of reviews to return.
+            label_text (str): Key name for the review text in the JSON.
+            label_rating (str): Key name for the review rating in the JSON.
+            seed (int): Random seed value for reproducibility.
 
         Returns:
-            tuple: A list of review dictionaries and a set of selected review indices.
+            tuple: A tuple containing:
+                - A list of dictionaries with review text and rating.
+                - A set of randomly selected indices corresponding to the reviews.
         """
         reviews = []
         total_lines = 0
@@ -239,6 +291,7 @@ class ReviewPreprocessor:
         with open(full_path, "r", encoding="utf-8") as f:
             for _ in f:
                 total_lines += 1
+
         random.seed(seed)
         random_indices = set(random.sample(range(total_lines), min(max_reviews, total_lines)))
         selected_lines = []
@@ -254,9 +307,12 @@ class ReviewPreprocessor:
                 data = json.loads(line)
                 if label_text in data and label_rating in data:
                     reviews.append({
-                        "text": data[label_text].replace('<br />', '\n').replace('"', "'").strip().lower(),
-                        "overall": data[label_rating]
+                        label_text: data[label_text].replace('<br />', '\n')
+                                                 .replace('"', "'")
+                                                 .strip().lower(),
+                        label_rating: data[label_rating]
                     })
             except json.JSONDecodeError:
                 continue
+
         return reviews, random_indices
