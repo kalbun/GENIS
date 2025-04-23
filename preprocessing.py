@@ -148,6 +148,37 @@ class ReviewPreprocessor:
             return wordnet.ADV
         return wordnet.NOUN
 
+    # ---------------------- Lemmatization Methods ---------------------- #
+    def LemmatizeText(self, text: str) -> str:
+        """
+        Lemmatize a sentence or phrase by converting words to their base forms.
+        For example, 'apples' becomes 'apple' and 'bad dogs' becomes 'bad dog'.
+
+        Args:
+            text (str): The text to lemmatize.
+
+        Returns:
+            str: The lemmatized text.
+        """
+        lemmatizer = WordNetLemmatizer()
+        tokens = word_tokenize(text)
+        pos_tags = pos_tag(tokens)
+        lemmas = [lemmatizer.lemmatize(word, self.GetWordnetPos(tag))
+                  for word, tag in pos_tags]
+        return " ".join(lemmas)
+
+    def LemmatizeList(self, texts: list[str]) -> list[str]:
+        """
+        Lemmatize a list of sentences or terms.
+
+        Args:
+            texts (list[str]): List of texts to lemmatize.
+
+        Returns:
+            list[str]: List of lemmatized texts.
+        """
+        return [self.LemmatizeText(text) for text in texts]
+
     # ---------------------- Preprocessing Methods ---------------------- #
     def PreprocessReviews(self, reviews: dict[str, float]) -> dict[str, dict]:
         """
@@ -237,15 +268,14 @@ class ReviewPreprocessor:
             if self.preprocessing_cache[review]["tokens"]:
                 continue
 
-            pos_tags = pos_tag(word_tokenize(self.preprocessing_cache[review]["corrected"]))
-            lemmatized_tokens = [
-                lemmatizer.lemmatize(word, self.GetWordnetPos(tag))
-                for word, tag in pos_tags
-            ]
-            # Filter out tokens that are not nouns, are stopwords or are too short.
+            # Use the new LemmatizeText method to obtain the lemmatized sentence.
+            lemmatized_sentence = self.LemmatizeText(self.preprocessing_cache[review]["corrected"])
+            # Tokenize and POS tag the lemmatized sentence.
+            pos_tags = pos_tag(word_tokenize(lemmatized_sentence))
+            # Filter out tokens that are not nouns, are stopwords, or are too short.
             filtered_tokens = [
-                word for word, tag in zip(lemmatized_tokens, pos_tags)
-                if tag[1].startswith('N') and word not in stop_words and len(word) > 1
+                word for word, tag in pos_tags
+                if tag.startswith('N') and word not in stop_words and len(word) > 1
             ]
             # Ensure tokens are unique.
             filtered_tokens = list(set(filtered_tokens))
