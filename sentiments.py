@@ -352,9 +352,12 @@ def assignGradeToReview(review: str) -> int:
     retry_counter: int = 0
     model: str = "mistral-small-latest"
     prompt: str = textwrap.dedent(f"""
-            Read this review and assign a grade from 1 to 10.
-            Return ONLY the grade. No comments, explanations, anything else!
+            Read this Amazon review and rate the customer experience
+            from 1 to 10, where 1 is the worst experience and 10 is the best.
+            You can use half scores (e.g. 7.5).
+            RETURN ONLY SCORE. NO COMMENTS, EXPLANATIONS, OR ANYTHING ELSE!!!
             ---
+            Review to score:
             {review}""")
 
     while (retry_counter < 3):
@@ -376,6 +379,7 @@ def assignGradeToReview(review: str) -> int:
                     raise e
                 llmSemaphore.release()
                 score = int(response.choices[0].message.content.strip())
+                break
         except SDKError:
             retry_counter += 1
             continue
