@@ -9,39 +9,32 @@ from key import MistraAIKey as api_key
 
 warnings.filterwarnings("ignore")
 
-
 class Sentiments:
-    def __init__(self):
+    def __init__(self, cachePath: str, bypass_cache: bool = False):
+        """
+        Initialize the Sentiments class with the given cache path and bypass cache option.
+        The class is responsible for managing sentiment analysis using a language model.
+
+        :param cachePath: the path to the cache directory        
+        :param bypass_cache: whether to bypass the cache loading
+        """
         # Global sentiment cache is maintained per file
         self.sentimentCache: dict = {}
-        self.sentimentCacheFile: str = ""
-        self.sentimentCacheBypass: bool = False
-
+        self.sentimentCacheFile: str = os.path.join(cachePath, "sentiment_cache.json")
+        self.sentimentLogFile: str = os.path.join(cachePath, "sentiment_log.txt")
+        #
+        self.sentimentCacheBypass: bool = bypass_cache
         # Using a semaphore for thread-safe access
         self.sentimentCacheSemaphore = threading.Semaphore(1)
-
-        self.sentimentLogFile: str = "sentiment.log"
-
         # Using a semaphore for thread-safe access to the LLM
         # Limiting the number of concurrent requests to 6, because
         # Mistral has a limit of 6 concurrent requests per API key
         self.llmSemaphore = threading.Semaphore(6)
-
         # Initialize the Mistral client
         self.genAI_Client = Mistral(api_key=api_key)
 
-    def sentimentCache_init(self, cache_file: str, bypass_cache: bool = False):
-        """
-        Initialize and load the sentiment cache variables. If bypass_cache is set
-        to True, the cache remains empty and is not saved, but can still be used
-        for storing sentiments.
-        
-        :param cache_file: the path to the cache file
-        :param bypass_cache: whether to bypass the cache loading
-        """
-        self.sentimentCacheFile = cache_file
-        self.sentimentCacheBypass = bypass_cache
-        self.sentimentCache = {}
+        if not os.path.exists(cachePath):
+            os.makedirs(cachePath, exist_ok=True)
         self.sentimentCache_Load()
 
     def sentimentCache_Load(self) -> dict:
@@ -338,10 +331,16 @@ class Sentiments:
         retry_counter: int = 0
         model: str = "mistral-small-latest"
         prompt: str = textwrap.dedent(f"""
-                Read this Amazon review and rate the customer experience
-                from 1 to 10, where 1 is the worst experience and 10 is the best.
-                You can use half scores (e.g. 7.5).
+                Read this Amazon review and rate customer experience
+                from 1 to 10, where 1 worst experience, 10 best.
+                You can use half scores like 6.5.
                 RETURN ONLY SCORE. NO COMMENTS, EXPLANATIONS, OR ANYTHING ELSE!!!
+                
+                Calibration examples:
+                1) 'Such a shit! Object broken, package damaged and seller did not answer. NEVER AGAIN!!!!' -> 1.0 to 2.0
+                2) 'The best music of my life! Great service and fantastic seller!' -> 9 to 10.0
+                3) 'The cd is decent' -> 6.0 to 6.5
+                4) Not an exceptional rubber duck, but it is nice and works' -> 7.0 to 7.5
                 ---
                 Review to score:
                 {review}""")
@@ -364,7 +363,7 @@ class Sentiments:
                         self.llmSemaphore.release()
                         raise e
                     self.llmSemaphore.release()
-                    score = int(response.choices[0].message.content.strip())
+                    score = float(response.choices[0].message.content.strip())
                     break
             except SDKError:
                 retry_counter += 1
