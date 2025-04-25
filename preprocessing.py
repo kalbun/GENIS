@@ -93,7 +93,19 @@ class ReviewPreprocessor:
         except Exception:
             pass
 
-    # ---------------------- Cache Update Methods ---------------------- #
+    # ---------------------- Cache Get/Update Methods ---------------------- #
+    def GetReviewFromCache(self, review: str) -> dict:
+        """
+        Retrieve a review from the preprocessing cache.
+
+        Args:
+            review (str): The review key in the cache.
+
+        Returns:
+            dict: The review data if found, otherwise None.
+        """
+        return self.preprocessing_cache.get(review)
+
     def AddSubitemToReviewCache(self, review: str, key: str, value) -> None:
         """
         Add or update a sub-item in the preprocessing cache for a given review.
@@ -203,34 +215,52 @@ class ReviewPreprocessor:
 
         # Initialize NLTK resources
         stop_words: set = set(stopwords.words('english'))
-        lemmatizer: WordNetLemmatizer = WordNetLemmatizer()
         spell_checker: SpellChecker = SpellChecker()
         spell_checker.word_frequency.load_words(stop_words)
 
-        # Prepare cache: if review already exists in cache, use it; else, initialize it.
-        for review in reviews:
-            if review in self.preprocessing_cache:
-                continue
-            corrected_sentence = fix(review.lower())
-            corrected_sentence = (
-                corrected_sentence.replace("\n", ". ")
-                                  .replace("\r", ". ")
-                                  .replace("\t", " ")
-            )
-            corrected_sentence = re.sub(r'[^A-Za-z0-9.?!]+', ' ', corrected_sentence)
-            corrected_sentence = re.sub(r'([!?])\1+', r'\1', corrected_sentence)
-            corrected_sentence = corrected_sentence.replace("mr.", "mister") \
-                                                   .replace("ms.", "miss") \
-                                                   .replace("dr.", "doctor") \
-                                                   .replace("etc.", "et cetera") \
-                                                   .replace("e.g.", "for example") \
-                                                   .replace("i.e.", "that is")
 
-            self.preprocessing_cache[review] = {
-                'corrected': corrected_sentence,
-                'tokens': "",   # This field will be filled after tokenization.
-                'score': reviews[review]
-            }
+        for rawReview in reviews:
+            if rawReview in self.preprocessing_cache:
+                continue
+
+            # Apply a light preprocessing to make it more human-readable.
+            readableReviews = (
+                rawReview \
+                .replace("\n", ". ")
+                .replace("\r", ". ")
+                .replace("\t", " ")
+                .replace("&#34;", "'")
+                .replace("&#39;", "'")
+                .replace("<br />", " ")
+                .replace("&nbsp;","")
+            )
+
+            # Now do a heavier preprocessing of the reviews.
+            # Note how we remove periods, to avoid splitting issues later on.
+            correctedReview = fix(readableReviews.lower())
+            correctedReview = re.sub(r'[^A-Za-z0-9.?!]+', ' ', correctedReview)
+            correctedReview = re.sub(r'([!?])\1+', r'\1', correctedReview)
+            correctedReview = correctedReview.replace("mr.", "mister") \
+                                             .replace("ms.", "miss") \
+                                             .replace("dr.", "doctor") \
+                                             .replace("etc.", "et cetera") \
+                                             .replace("e.g.", "for example") \
+                                             .replace("i.e.", "that is")
+
+            if rawReview in self.preprocessing_cache:
+                self.preprocessing_cache[rawReview].update({
+                    'readable': readableReviews,
+                    'corrected': correctedReview,
+                    'tokens': self.preprocessing_cache[rawReview].get('tokens', ""),  # Preserve existing tokens if present.
+                    'score': reviews[rawReview]
+                })
+            else:
+                self.preprocessing_cache[rawReview] = {
+                    'readable': readableReviews,
+                    'corrected': correctedReview,
+                    'tokens': "",  # This field will be filled after tokenization.
+                    'score': reviews[rawReview]
+                }
 
         # Build a bag of unique words from all corrected sentences, ignoring numeric tokens.
         bag_of_words = sorted(
@@ -251,25 +281,25 @@ class ReviewPreprocessor:
         self.SaveCorrectionCache()
 
         # Update the corrected sentence based on the correction cache.
-        for review in reviews:
-            corrected_sentence = self.preprocessing_cache[review]["corrected"]
-            self.preprocessing_cache[review]["corrected"] = " ".join(
+        for rawReview in reviews:
+            correctedReview = self.preprocessing_cache[rawReview]["corrected"]
+            self.preprocessing_cache[rawReview]["corrected"] = " ".join(
                 self.correction_cache.get(word, word)
-                for word in corrected_sentence.split()
+                for word in correctedReview.split()
 #                if not any(char.isdigit() for char in word)
             ).strip()
 
         # Process reviews to obtain lemmatized tokens and filter based on POS and stopwords.
-        for idx, review in enumerate(reviews):
+        for idx, rawReview in enumerate(reviews):
             if idx and (idx % 100 == 0):
                 print(".", end="", flush=True)
                 self.SavePreprocessingCache()
             # Process only if tokens have not been computed yet.
-            if self.preprocessing_cache[review]["tokens"]:
+            if self.preprocessing_cache[rawReview]["tokens"]:
                 continue
 
             # Use the new LemmatizeText method to obtain the lemmatized sentence.
-            lemmatized_sentence = self.LemmatizeText(self.preprocessing_cache[review]["corrected"])
+            lemmatized_sentence = self.LemmatizeText(self.preprocessing_cache[rawReview]["corrected"])
             # Tokenize and POS tag the lemmatized sentence.
             pos_tags = pos_tag(word_tokenize(lemmatized_sentence))
             # Filter out tokens that are not nouns, are stopwords, or are too short.
@@ -280,7 +310,7 @@ class ReviewPreprocessor:
             # Ensure tokens are unique.
             filtered_tokens = list(set(filtered_tokens))
             filtered_sentence = " ".join(filtered_tokens)
-            self.preprocessing_cache[review]["tokens"] = filtered_sentence
+            self.preprocessing_cache[rawReview]["tokens"] = filtered_sentence
 
         self.SavePreprocessingCache()
 
