@@ -9,16 +9,15 @@ from collections import Counter
 
 warnings.simplefilter(action='ignore')
 
-
 class EmbeddingsManager:
-    def __init__(self, embeddings_cache_file: str, prevent_cache: bool = False):
+    def __init__(self, cachePath: str, prevent_cache: bool = False):
         """
         Initialize the embeddings manager. If prevent_cache is True, the cache is not saved.
         """
         self.embeddingsCache = {}
         self.overallTopicEmbedding = None
         self.preventEmbeddingCaching: bool = prevent_cache
-        self._embeddingsCacheFile = embeddings_cache_file
+        self._embeddingsCacheFile = os.path.join(cachePath, "embeddings_cache.pkl")
         self._load_cache()
 
     def _load_cache(self):

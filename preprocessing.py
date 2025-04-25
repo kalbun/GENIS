@@ -26,7 +26,7 @@ class ReviewPreprocessor:
     It supports saving and loading both preprocessing and correction caches.
     """
 
-    def __init__(self, file_prefix: str):
+    def __init__(self, cachePath: str):
         """
         Initialize the preprocessor with file paths for caching results.
 
@@ -34,10 +34,9 @@ class ReviewPreprocessor:
             file_prefix (str): The prefix for the cache file names.
         """
         self.preprocessing_cache: dict = {}
-        self.preprocessing_cache_file: str = file_prefix + "_preprocessing_cache.json"
         self.correction_cache: dict = {}
-        self.correction_cache_file: str = file_prefix + "_correction_cache.json"
-
+        self.preprocessing_cache_file: str = os.path.join(cachePath, "preprocessing_cache.json")
+        self.correction_cache_file: str = os.path.join(cachePath, "correction_cache.json")
         self.LoadPreprocessingCache()
         self.LoadCorrectionCache()
 
