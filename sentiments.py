@@ -9,537 +9,524 @@ from key import MistraAIKey as api_key
 
 warnings.filterwarnings("ignore")
 
-# Global sentiment cache is maintained per file
-sentimentCache: dict
-sentimentCacheFile: str = ""
-sentimentCacheBypass: bool = False
 
-# Using a semaphore for thread-safe access
-sentimentCacheSemaphore = threading.Semaphore(1)
+class Sentiments:
+    def __init__(self):
+        # Global sentiment cache is maintained per file
+        self.sentimentCache: dict = {}
+        self.sentimentCacheFile: str = ""
+        self.sentimentCacheBypass: bool = False
 
-sentimentLogFile: str = "sentiment.log"
+        # Using a semaphore for thread-safe access
+        self.sentimentCacheSemaphore = threading.Semaphore(1)
 
-# Using a semaphore for thread-safe access to the LLM
-# Limiting the number of concurrent requests to 6, because
-# Mistral has a limit of 6 concurrent requests per API key
-llmSemaphore = threading.Semaphore(6)
+        self.sentimentLogFile: str = "sentiment.log"
 
-# Initialize the Mistral client
-genAI_Client = Mistral(api_key=api_key)
+        # Using a semaphore for thread-safe access to the LLM
+        # Limiting the number of concurrent requests to 6, because
+        # Mistral has a limit of 6 concurrent requests per API key
+        self.llmSemaphore = threading.Semaphore(6)
 
-def sentimentCache_init(cache_file: str, bypass_cache: bool = False):
-    """
-    Initialize and load the sentiment cache variables. If bypass_cache is set
-    to True, the cache remains empty and is not saved, but can still be used
-    for storing sentiments.
+        # Initialize the Mistral client
+        self.genAI_Client = Mistral(api_key=api_key)
 
-    :param cache_file: the path to the cache file
-    :param bypass_cache: whether to bypass the cache loading
-    """
-    global sentimentCache, sentimentCacheFile, sentimentCacheBypass
+    def sentimentCache_init(self, cache_file: str, bypass_cache: bool = False):
+        """
+        Initialize and load the sentiment cache variables. If bypass_cache is set
+        to True, the cache remains empty and is not saved, but can still be used
+        for storing sentiments.
+        
+        :param cache_file: the path to the cache file
+        :param bypass_cache: whether to bypass the cache loading
+        """
+        self.sentimentCacheFile = cache_file
+        self.sentimentCacheBypass = bypass_cache
+        self.sentimentCache = {}
+        self.sentimentCache_Load()
 
-    sentimentCacheFile = cache_file
-    sentimentCacheBypass = bypass_cache
-    sentimentCache = {}
-    sentimentCache_Load()
-
-# Global sentiment cache is maintained per file
-def sentimentCache_Load() -> dict:
-    """
-    Load the sentiment cache from the file if it exists and bypass is not set.
-    
-    :return: the sentiment cache as a dictionary
-    """
-    global sentimentCache, sentimentCacheFile, sentimentCacheBypass
-
-    if (not sentimentCacheBypass) and os.path.exists(sentimentCacheFile):
-        try:
-            with open(sentimentCacheFile, "rt", encoding="utf-8") as f:
-                sentimentCache = json.load(f)
-        except Exception:
-            pass
-    return sentimentCache
-
-
-def sentimentCache_Save():
-    """
-    Save the sentiment cache to the file if bypass is not set.
-    """
-    global sentimentCache, sentimentCacheFile, sentimentCacheBypass
-
-    if (not sentimentCacheBypass):
-        if (sentimentCacheSemaphore.acquire()):
+    def sentimentCache_Load(self) -> dict:
+        """
+        Load the sentiment cache from the file if it exists and bypass is not set.
+        
+        :return: the sentiment cache as a dictionary
+        """
+        if (not self.sentimentCacheBypass) and os.path.exists(self.sentimentCacheFile):
             try:
-                with open(sentimentCacheFile, "wt", encoding="utf-8") as f:
-                    json.dump(sentimentCache, f, ensure_ascii=False, indent=4)
+                with open(self.sentimentCacheFile, "rt", encoding="utf-8") as f:
+                    self.sentimentCache = json.load(f)
             except Exception:
                 pass
-            sentimentCacheSemaphore.release()
+        return self.sentimentCache
 
+    def sentimentCache_Save(self):
+        """
+        Save the sentiment cache to the file if bypass is not set.
+        """
+        if not self.sentimentCacheBypass:
+            if self.sentimentCacheSemaphore.acquire():
+                try:
+                    with open(self.sentimentCacheFile, "wt", encoding="utf-8") as f:
+                        json.dump(self.sentimentCache, f, ensure_ascii=False, indent=4)
+                except Exception:
+                    pass
+                self.sentimentCacheSemaphore.release()
 
-def sentimentCache_CreateItem(item: str, topic_sentiments: dict):
-    """
-    Create a new item in the sentiment cache with the given topic sentiments.
-    
-    :param item: the item to create in the cache
-    :param topic_sentiments: the topic sentiments to associate with the item
-    """
-    global sentimentCache, sentimentCacheSemaphore
+    def sentimentCache_CreateItem(self, item: str, topic_sentiments: dict):
+        """
+        Create a new item in the sentiment cache with the given topic sentiments.
+        
+        :param item: the item to create in the cache
+        :param topic_sentiments: the topic sentiments to associate with the item
+        """
+        if self.sentimentCacheSemaphore.acquire():
+            self.sentimentCache[item] = {}
+            if topic_sentiments:
+                # If topic sentiments are provided, add them to the cache
+                self.sentimentCache[item]['sentiments'] = topic_sentiments
+            self.sentimentCacheSemaphore.release()
 
-    if sentimentCacheSemaphore.acquire():
-        sentimentCache[item] = {}
-        if topic_sentiments:
-            # If topic sentiments are provided, add them to the cache
-            sentimentCache[item]['sentiments'] = topic_sentiments
-        sentimentCacheSemaphore.release()
+    def sentimentCache_updateSentiment(self, item: str, topic_sentiments: dict):
+        """
+        Update the sentiment for the given item in the cache.
+        
+        :param item: the item to update in the cache
+        :param topic_sentiments: the topic sentiments to update
+        """
+        if self.sentimentCacheSemaphore.acquire():
+            # Update or create the item with the provided sentiments
+            self.sentimentCache[item] = {'sentiments': topic_sentiments}
+            self.sentimentCacheSemaphore.release()
 
-def sentimentCache_updateSentiment(item: str, topic_sentiments: dict):
-    """
-    Update the sentiment for the given item in the cache.
+    def sentimentCache_updateOriginalRating(self, item: str, originalRating: float, newRating: float):
+        """
+        Update the original rating in the sentiment cache for the given item.
+        
+        :param item: the item to update in the cache
+        :param originalRating: the original rating to update
+        :param newRating: the new rating to set in the cache
+        """
+        if self.sentimentCacheSemaphore.acquire():
+            self.sentimentCache[item][str(originalRating)] = newRating
+            self.sentimentCacheSemaphore.release()
 
-    :param item: the item to update in the cache
-    :param topic_sentiments: the topic sentiments to update
-    """
-    global sentimentCache, sentimentCacheSemaphore
+    def adjustRating(self, original_score, topic_sentiments):
+        # Calculate the adjusted rating based on numeric sentiment values
+        numeric_values = [v for v in topic_sentiments.values() if isinstance(v, (int, float))]
+        if numeric_values:
+            return original_score + sum(numeric_values)
+        return original_score
 
-    if sentimentCacheSemaphore.acquire():
-        # Update or create the item with the provided sentiments
-        sentimentCache[item] = {'sentiments': topic_sentiments}
-        sentimentCacheSemaphore.release()
+    def returnMostRelevantTopic(self, topics: list[str]) -> str:
+        """
+        Return a term that describes all the topics in the list.
+        
+        :param topics: the list of topics to check
+        :return: the most relevant topic from the list
+        """
+        prompt: str = ""
+        topic: str = ""
 
-def sentimentCache_updateOriginalRating(item: str, originalRating: float, newRating: float):
-    """
-    Update the original rating in the sentiment cache for the given item.
+        prompt = textwrap.dedent(f"""
+            Return most representative topic from following list,
+            Return ONLY topic. No comments, explanations, anything else!
+            List:
 
-    :param item: the item to update in the cache
-    :param originalRating: the original rating to update
-    :param newRating: the new rating to set in the cache
-    """
-    global sentimentCache, sentimentCacheSemaphore
-
-    if sentimentCacheSemaphore.acquire():
-        sentimentCache[item][str(originalRating)] = newRating
-        sentimentCacheSemaphore.release()
-
-def sentiment_adjustRating(original_score, topic_sentiments):
-    numeric_values = [v for v in topic_sentiments.values() if isinstance(v, (int, float))]
-    if numeric_values:
-        return original_score + sum(numeric_values)
-    return original_score
-
-def sentiment_returnMostRelevantTopic(topics: list[str]) -> str:
-    """
-    Return a term that describes all the topics in the list.
-    
-    :param topics: the list of topics to check
-    :return: the most relevant topic from the list
-    """
-
-    prompt: str = ""
-    topic: str = ""
-
-    prompt = textwrap.dedent(f"""
-        Return most representative topic from following list,
-        Return ONLY topic. No comments, explanations, anything else!
-        List:
-
-        {topics}
-    """)
-
-    model = "mistral-small-latest"
-
-    if (llmSemaphore.acquire()):
-        try:
-            response = genAI_Client.chat.complete(
-                model = model,
-                temperature=0.0,
-                messages = [
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
-                ]
-            )
-        except SDKError as e:
-            llmSemaphore.release()
-            raise e
-        with open(sentimentLogFile, "a") as f:
-            f.write(f"Prompt: {topics}\n")
-            f.write(f"Response: {response.choices[0].message.content.strip()}\n")
-        llmSemaphore.release()
-        # The response should be a single line with the topic.
-        topic = response.choices[0].message.content.strip()
-
-    return topic
-
-def sentiment_topicsFromSentence(sentence: str) -> list[str]:
-    """
-    Return a list of topics from the given sentence.
-    The topics extraction is based on the LLM model.
-
-    :param sentence: the sentence to check
-    :return: the list of topics from the sentence
-    """
-    topics: list[str] = []
-    prompt: str = ""
-
-    prompt = textwrap.dedent(f"""
-        Read *Sentence* for emotional content.
-        - return a list of newline-separated nouns associated with strong sentiments, empty string if no sentiment.
-        - Return single word. 'cover' is OK, 'cd cover' is not.
-        - Return ONLY nouns. No adjectives, verbs, adverbs, etc.
-        - No comments, explanations, or anything else!
-
-        Example with one strong sentiment (decent is a mild sentiment):
-            *Sentence*:
-                The cd is decent but the shipping was horrible!
-            Answer:
-                cover
-
-        Example with two strong sentiments:
-            *Sentence*:
-                The cd is... bombastic!! but the shipping was horrible!
-            Answer:
-                cd
-                shipping
-
-        Example with no sentiment (good is a mild sentiment):
-            *Sentence*:
-                The cd is decent
-            Answer (nothing, empty string):
-                
-
-        Here is *Sentence*:
-        {sentence}
+            {topics}
         """)
 
-    model = "mistral-small-latest"
+        model: str = "mistral-small-latest"
 
-    if (llmSemaphore.acquire()):
-        try:
-            response = genAI_Client.chat.complete(
-                model = model,
-                temperature=0.0,
-                messages = [
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
-                ]
-            )
-        except SDKError as e:
-            llmSemaphore.release()
-            raise e
-        llmSemaphore.release()
-        topics = response.choices[0].message.content.strip().split("\n")
-    return topics
+        if self.llmSemaphore.acquire():
+            try:
+                response = self.genAI_Client.chat.complete(
+                    model=model,
+                    temperature=0.0,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": prompt,
+                        },
+                    ]
+                )
+            except SDKError as e:
+                self.llmSemaphore.release()
+                raise e
+            with open(self.sentimentLogFile, "a") as f:
+                f.write(f"Prompt: {topics}\n")
+                f.write(f"Response: {response.choices[0].message.content.strip()}\n")
+            self.llmSemaphore.release()
+            # The response should be a single line with the topic.
+            topic = response.choices[0].message.content.strip()
 
+        return topic
 
-def sentiment_aggregateSimilarTopics(topics: list[str]) -> list[str]:
-    """
-    Aggregate similar topics in the sentiment dictionary.
-    
-    :param topics: the list of topics to aggregate
-    :return: the aggregated topic sentiments dictionary
-    """
-    aggregated_sentiments: list[str] = []
-    prompt: str = ""
+    def topicsFromSentence(self, sentence: str) -> list[str]:
+        """
+        Return a list of topics from the given sentence.
+        The topics extraction is based on the LLM model.
+        
+        :param sentence: the sentence to check
+        :return: the list of topics from the sentence
+        """
+        topics: list[str] = []
+        prompt: str = ""
 
-    prompt = textwrap.dedent(f"""
-        Your task is to read a list of term that can contain
-        synonyms, and return a single word that represents the list.
-        Return ONLY a term. No comments, explanations, or anything else!
+        prompt = textwrap.dedent(f"""
+            Read *Sentence* for emotional content.
+            - return a list of newline-separated nouns associated with strong sentiments, empty string if no sentiment.
+            - Return single word. 'cover' is OK, 'cd cover' is not.
+            - Return ONLY nouns. No adjectives, verbs, adverbs, etc.
+            - No comments, explanations, or anything else!
 
-        Example:
+            Example with one strong sentiment (decent is a mild sentiment):
+                *Sentence*:
+                    The cd is decent but the shipping was horrible!
+                Answer:
+                    cover
+
+            Example with two strong sentiments:
+                *Sentence*:
+                    The cd is... bombastic!! but the shipping was horrible!
+                Answer:
+                    cd
+                    shipping
+
+            Example with no sentiment (good is a mild sentiment):
+                *Sentence*:
+                    The cd is decent
+                Answer (nothing, empty string):
+                    
+
+            Here is *Sentence*:
+            {sentence}
+        """)
+
+        model: str = "mistral-small-latest"
+
+        if self.llmSemaphore.acquire():
+            try:
+                response = self.genAI_Client.chat.complete(
+                    model=model,
+                    temperature=0.0,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": prompt,
+                        },
+                    ]
+                )
+            except SDKError as e:
+                self.llmSemaphore.release()
+                raise e
+            self.llmSemaphore.release()
+            topics = response.choices[0].message.content.strip().split("\n")
+        return topics
+
+    def aggregateSimilarTopics(self, topics: list[str]) -> list[str]:
+        """
+        Aggregate similar topics in the sentiment dictionary.
+        
+        :param topics: the list of topics to aggregate
+        :return: the aggregated topic sentiments dictionary
+        """
+        aggregated_sentiments: list[str] = []
+        prompt: str = ""
+
+        prompt = textwrap.dedent(f"""
+            Your task is to read a list of term that can contain
+            synonyms, and return a single word that represents the list.
+            Return ONLY a term. No comments, explanations, or anything else!
+
+            Example:
+
+                List:
+                    disk
+                    cd
+                    album
+                    record
+                    
+                Your output:
+                    disk
 
             List:
-                disk
-                cd
-                album
-                record
-                
-            Your output:
-                disk
-
-        List:
-        {topics}
-        ---""")
-
-    model = "mistral-small-latest"
-
-    if (llmSemaphore.acquire()):
-        try:
-            response = genAI_Client.chat.complete(
-                model = model,
-                temperature=0.0,
-                messages = [
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
-                ]
-            )
-        except SDKError as e:
-            llmSemaphore.release()
-            raise e
-        llmSemaphore.release()
-        # attempt to parse the response. Items should be separated by newlines
-        # and should be put in a list.
-        aggregated_sentiments = response.choices[0].message.content.strip().split("\n")
-        # Remove empty strings and strip whitespace from each item
-        aggregated_sentiments = [item.strip() for item in aggregated_sentiments if item.strip()]    
-
-    return aggregated_sentiments
-
-def sentiment_getTypicalTopics(generalTopic: str) -> list[str]:
-    """
-    Return a list of topics typically associated with the given general topic.
-
-    :param generalTopic: the general topic to check
-    :return: the list of typical topics associated with the general topic
-    """
-    associatedSentiments: list[str] = []
-    prompt: str = ""
-
-    prompt = textwrap.dedent(f"""
-        Task: return 5 terms typically associated with given general topic.
-        Return ONLY term. No comments, explanations, or anything else!
-
-        Example:
-            general topic: 'digital music'
-            Your output:
-                ['music', 'sound', 'orchestra', 'band', 'concert']
-
-        general topic:
-        {generalTopic}
+            {topics}
+            ---
         """)
 
-    model = "mistral-small-latest"
+        model: str = "mistral-small-latest"
 
-    if (llmSemaphore.acquire()):
-        try:
-            response = genAI_Client.chat.complete(
-                model = model,
-                temperature=0.0,
-                messages = [
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    },
-                ]
-            )
-        except SDKError as e:
-            llmSemaphore.release()
-            raise e
-        llmSemaphore.release()
-        # attempt to parse the response. Items should be separated by newlines
-        # and should be put in a list.
-        associatedSentiments = response.choices[0].message.content.strip().split("\n")
-        associatedSentiments.append(generalTopic)
+        if self.llmSemaphore.acquire():
+            try:
+                response = self.genAI_Client.chat.complete(
+                    model=model,
+                    temperature=0.0,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": prompt,
+                        },
+                    ]
+                )
+            except SDKError as e:
+                self.llmSemaphore.release()
+                raise e
+            self.llmSemaphore.release()
+            # attempt to parse the response. Items should be separated by newlines
+            # and should be put in a list.
+            aggregated_sentiments = response.choices[0].message.content.strip().split("\n")
+            # Remove empty strings and strip whitespace from each item
+            aggregated_sentiments = [item.strip() for item in aggregated_sentiments if item.strip()]
+        return aggregated_sentiments
 
-    return associatedSentiments
+    def getTypicalTopics(self, generalTopic: str) -> list[str]:
+        """
+        Return a list of topics typically associated with the given general topic.
+        
+        :param generalTopic: the general topic to check
+        :return: the list of typical topics associated with the general topic
+        """
+        associatedSentiments: list[str] = []
+        prompt: str = ""
 
-def assignGradeToReview(review: str) -> int:
-    """
-    Assign a grade from 1 to 10 to the review, using a zero-shot
-    LLM questioning. The grade is based only on the review text,
-    because the LLM does not know the rating.
+        prompt = textwrap.dedent(f"""
+            Task: return 5 terms typically associated with given general topic.
+            Return ONLY term. No comments, explanations, or anything else!
 
-    :param review: the review text
-    :param rating: the rating of the review
-    """
-    score: int = 0
-    retry_counter: int = 0
-    model: str = "mistral-small-latest"
-    prompt: str = textwrap.dedent(f"""
-            Read this Amazon review and rate the customer experience
-            from 1 to 10, where 1 is the worst experience and 10 is the best.
-            You can use half scores (e.g. 7.5).
-            RETURN ONLY SCORE. NO COMMENTS, EXPLANATIONS, OR ANYTHING ELSE!!!
-            ---
-            Review to score:
-            {review}""")
+            Example:
+                general topic: 'digital music'
+                Your output:
+                    ['music', 'sound', 'orchestra', 'band', 'concert']
 
-    while (retry_counter < 3):
-        try:
-            if (llmSemaphore.acquire()):
-                try:
-                    response = genAI_Client.chat.complete(
-                        model = model,
-                        temperature=0.0,
-                        messages = [
-                            {
-                                "role": "user",
-                                "content": prompt,
-                            },
-                        ]
-                    )
-                except SDKError as e:
-                    llmSemaphore.release()
-                    raise e
-                llmSemaphore.release()
-                score = int(response.choices[0].message.content.strip())
-                break
-        except SDKError:
-            retry_counter += 1
-            continue
-        except Exception:
-            # exit
-            print("E", end="", flush=True)
-            break # empty output
+            general topic:
+            {generalTopic}
+        """)
 
-    return score
+        model: str = "mistral-small-latest"
 
+        if self.llmSemaphore.acquire():
+            try:
+                response = self.genAI_Client.chat.complete(
+                    model=model,
+                    temperature=0.0,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": prompt,
+                        },
+                    ]
+                )
+            except SDKError as e:
+                self.llmSemaphore.release()
+                raise e
+            self.llmSemaphore.release()
+            # attempt to parse the response. Items should be separated by newlines
+            # and should be put in a list.
+            associatedSentiments = response.choices[0].message.content.strip().split("\n")
+            associatedSentiments.append(generalTopic)
+        return associatedSentiments
 
+    def assignGradeToReview(self, review: str) -> int:
+        """
+        Assign a grade from 1 to 10 to the review, using a zero-shot
+        LLM questioning. The grade is based only on the review text,
+        because the LLM does not know the rating.
+        
+        :param review: the review text
+        :param rating: the rating of the review
+        """
+        score: int = 0
+        retry_counter: int = 0
+        model: str = "mistral-small-latest"
+        prompt: str = textwrap.dedent(f"""
+                Read this Amazon review and rate the customer experience
+                from 1 to 10, where 1 is the worst experience and 10 is the best.
+                You can use half scores (e.g. 7.5).
+                RETURN ONLY SCORE. NO COMMENTS, EXPLANATIONS, OR ANYTHING ELSE!!!
+                ---
+                Review to score:
+                {review}""")
 
-def sentiment_parseScore(text: str, topics: list[str]) -> dict:
-    """
-    Parse the sentiment of the review text using the LLM model.
-    :param text: the review text
-    :param topics: the topics to consider for sentiment analysis
-    :return: the sentiments of the review text as a dictionary
-    """
+        while (retry_counter < 3):
+            try:
+                if self.llmSemaphore.acquire():
+                    try:
+                        response = self.genAI_Client.chat.complete(
+                            model=model,
+                            temperature=0.0,
+                            messages=[
+                                {
+                                    "role": "user",
+                                    "content": prompt,
+                                },
+                            ]
+                        )
+                    except SDKError as e:
+                        self.llmSemaphore.release()
+                        raise e
+                    self.llmSemaphore.release()
+                    score = int(response.choices[0].message.content.strip())
+                    break
+            except SDKError:
+                retry_counter += 1
+                continue
+            except Exception:
+                # exit
+                print("E", end="", flush=True)
+                break  # empty output
 
-    output: dict = {}
-    retry_counter: int = 0
-    prompt: str = ""
+        return score
 
-#    if not any(topic.lower() in text.lower() for topic in topics):
-#        return output
+    def parseScore(self, text: str, topics: list[str]) -> dict:
+        """
+        Parse the sentiment of the review text using the LLM model.
+        
+        :param text: the review text
+        :param topics: the topics to consider for sentiment analysis
+        :return: the sentiments of the review text as a dictionary
+        """
+        output: dict = {}
+        retry_counter: int = 0
+        prompt: str = ""
+        
+        #    if not any(topic.lower() in text.lower() for topic in topics):
+        #        return output
+        
+        prompt = textwrap.dedent(f"""
+                Your task is to
+                1) search list of topics in a review text
+                2) calculate sentiment of each topic in text as score
+                    -1 (very negative), 0 (neutral/not found), 1 (very positive).
+                3) return sentiments as JSON object. ONLY JSON. No comments, explanations, anything else.
 
-    prompt = textwrap.dedent(f"""
-            Your task is to
-            1) search list of topics in a review text
-            2) calculate sentiment of each topic in text as score
-                -1 (very negative), 0 (neutral/not found), 1 (very positive).
-            3) return sentiments as JSON object. ONLY JSON. No comments, explanations, anything else.
+                Example 1:
+                    text: 'Not bad CD, not great either'
+                    Topics: ['cd','cover']
+                    Output:
+                    {{
+                        "cd": 0,
+                        "cover": 0
+                    }}
 
-            Example 1:
-                text: 'Not bad CD, not great either'
-                Topics: ['cd','cover']
-                Output:
-                {{
-                    "cd": 0,
-                    "cover": 0
-                }}
+                Example 2:
+                    text: 'Gosh, the cd is... bombastic! But the cover is awful :-('
+                    Topics: ['cd','cover']
+                    Output:
+                    {{
+                        "cd": 1,
+                        "cover": -1
+                    }}
 
-            Example 2:
-                text: 'Gosh, the cd is... bombastic! But the cover is awful :-('
-                Topics: ['cd','cover']
-                Output:
-                {{
-                    "cd": 1,
-                    "cover": -1
-                }}
+                ---
+                TEXT:
+                {text}.
+                ---
+                TOPICS:
+                {topics}
+                ---""")
 
-            ---
-            TEXT:
-            {text}.
-            ---
-            TOPICS:
-            {topics}
-            ---""")
+        model: str = "mistral-small-latest"
 
-    model = "mistral-small-latest"
-
-    # if the text is cached, retrieve the sentiment from the cache
-    # and return it
-    if text in sentimentCache:
-        cached_data = sentimentCache[text]
-        if 'sentiments' in cached_data:
-            # if sentiments are cached, check if adjusted rating is cached
-            output = cached_data['sentiments']
-            print("C", end="", flush=True)
-            return output
-
-    while (retry_counter < 3):
-        try:
-            if (llmSemaphore.acquire()):
-                try:
-                    response = genAI_Client.chat.complete(
-                        model = model,
-                        temperature=0.0,
-                        messages = [
-                            {
-                                "role": "user",
-                                "content": prompt,
-                            },
-                        ]
-                    )
-                except SDKError as e:
-                    llmSemaphore.release()
-                    raise e
-                with open(sentimentLogFile, "a") as f:
-                    f.write(f"Text: {text}\n")
-                    f.write(f"Topics: {topics}\n")
-                    f.write(f"Response: {response.choices[0].message.content.strip()}\n")
-                llmSemaphore.release()
-                # attempt to parse the response
-                try:
-                    match = re.search(r'\{.*\}', response.choices[0].message.content, re.DOTALL)
-                    if match:
-                        output = json.loads(match.group(0))
-                        # update the sentiment cache with the parsed output
-                        sentimentCache_updateSentiment(text, output)
-                        sentimentCache_Save()
-                except json.JSONDecodeError:
-                    print("J", end="", flush=True)
-                break
-        except SDKError:
-            retry_counter += 1
-            continue
-        except Exception:
-            # exit
-            print("E", end="", flush=True)
-            break # empty output
-
-    return output
-
-def sentimentCache_getSentimentAndAdjustedRating(text: str, original_rating: float, topics: list[str], forceRandom: bool = False) -> tuple[dict, float]:
-
-    global sentimentCache
-    global sentimentCacheSemaphore
-    global sentimentCacheFile
-
-    topic_sentiments: dict = {}
-    adjusted_rating: float = original_rating
-    import random
-    if (forceRandom):
-        # Case 1: adjusted rating is random
-        for i in range(len(topics)):
-            adjusted_rating += round(random.random() * 4 - 2)/2
-    elif text in sentimentCache:
-        # Case 2: sentemce already cached
-        cached_data = sentimentCache[text]
-        # if text in cache, check if sentiments are cached
-        if 'sentiments' in cached_data:
-            # if sentiments are cached, check if adjusted rating is cached
-            topic_sentiments = cached_data['sentiments']
-            if str(original_rating) in cached_data and cached_data[str(original_rating)]:
-                # if adjusted rating is cached, there is nothing to do
-#                adjusted_rating = cached_data[str(original_rating)]
+        # if the text is cached, retrieve the sentiment from the cache
+        # and return it
+        if text in self.sentimentCache:
+            cached_data = self.sentimentCache[text]
+            if 'sentiments' in cached_data:
+                # if sentiments are cached, check if adjusted rating is cached
+                output = cached_data['sentiments']
                 print("C", end="", flush=True)
+                return output
+
+        while (retry_counter < 3):
+            try:
+                if self.llmSemaphore.acquire():
+                    try:
+                        response = self.genAI_Client.chat.complete(
+                            model=model,
+                            temperature=0.0,
+                            messages=[
+                                {
+                                    "role": "user",
+                                    "content": prompt,
+                                },
+                            ]
+                        )
+                    except SDKError as e:
+                        self.llmSemaphore.release()
+                        raise e
+                    with open(self.sentimentLogFile, "a") as f:
+                        f.write(f"Text: {text}\n")
+                        f.write(f"Topics: {topics}\n")
+                        f.write(f"Response: {response.choices[0].message.content.strip()}\n")
+                    self.llmSemaphore.release()
+                    # attempt to parse the response
+                    try:
+                        match = re.search(r'\{.*\}', response.choices[0].message.content, re.DOTALL)
+                        if match:
+                            output = json.loads(match.group(0))
+                            # update the sentiment cache with the parsed output
+                            self.sentimentCache_updateSentiment(text, output)
+                            self.sentimentCache_Save()
+                    except json.JSONDecodeError:
+                        print("J", end="", flush=True)
+                    break
+            except SDKError:
+                retry_counter += 1
+                continue
+            except Exception:
+                # exit
+                print("E", end="", flush=True)
+                break  # empty output
+
+        return output
+
+    def sentimentCache_getSentimentAndAdjustedRating(self, text: str, original_rating: float, topics: list[str], forceRandom: bool = False) -> tuple[dict, float]:
+        """
+        Retrieve sentiment data and calculate the adjusted rating based on available topics.
+        
+        :param text: the review text
+        :param original_rating: the original rating of the review
+        :param topics: topics for sentiment analysis
+        :param forceRandom: if set, adjust rating randomly
+        :return: a tuple of (topic sentiment dictionary, adjusted rating)
+        """
+        topic_sentiments: dict = {}
+        adjusted_rating: float = original_rating
+        import random
+        if forceRandom:
+            # Case 1: adjusted rating is random
+            for i in range(len(topics)):
+                adjusted_rating += round(random.random() * 4 - 2) / 2
+        elif text in self.sentimentCache:
+            # Case 2: sentence already cached
+            cached_data = self.sentimentCache[text]
+            # if text in cache, check if sentiments are cached
+            if 'sentiments' in cached_data:
+                # if sentiments are cached, check if adjusted rating is cached
+                topic_sentiments = cached_data['sentiments']
+                if str(original_rating) in cached_data and cached_data[str(original_rating)]:
+                    # if adjusted rating is cached, there is nothing to do
+                    # adjusted_rating = cached_data[str(original_rating)]
+                    print("C", end="", flush=True)
+                else:
+                    # if adjusted rating is not cached, calculate it based on the sentiments
+                    adjusted_rating = self.adjustRating(original_rating, topic_sentiments)
+                    self.sentimentCache_updateOriginalRating(text, original_rating, adjusted_rating)
+                    self.sentimentCache_Save()
+                    print(".", end="", flush=True)
             else:
-                # if adjusted rating is not cached, calculate it based on the sentiments
-                adjusted_rating = sentiment_adjustRating(original_rating, topic_sentiments)
-                sentimentCache_updateOriginalRating(text, original_rating, adjusted_rating)
-                sentimentCache_Save()
-                print(".", end="", flush=True)
+                # if sentiments are not cached and there are topics, calculate them
+                if len(topics) > 0:
+                    topic_sentiments = self.parseScore(text, topics)
+                    self.sentimentCache_updateSentiment(text, topic_sentiments)
+                    topic_sentiments, adjusted_rating = self.sentimentCache_getSentimentAndAdjustedRating(text, original_rating, topics)
+                else:
+                    # Sentiment empty and no topics for sentiment analysis.
+                    self.sentimentCache_updateOriginalRating(text, original_rating, original_rating)
+                    self.sentimentCache_Save()
+                    print("_", end="", flush=True)
         else:
-            # if sentiments are not cached and there are topics, calculate them
-            if (len(topics) > 0):
-                topic_sentiments = sentiment_parseScore(text, original_rating, topics)
-                sentimentCache_updateSentiment(text, topic_sentiments)
-                topic_sentiments, adjusted_rating = sentimentCache_getSentimentAndAdjustedRating(text, original_rating, topics)
-            else:
-                # Sentiment empty and not topics for sentiment analysis.
-                sentimentCache_updateOriginalRating(text, original_rating, original_rating)
-                sentimentCache_Save()
-                print("_", end="", flush=True)
+            # if text not in cache, create a new entry and recurse
+            self.sentimentCache_CreateItem(text, {})
+            topic_sentiments, adjusted_rating = self.sentimentCache_getSentimentAndAdjustedRating(text, original_rating, topics)
 
-    else:
-        # if text not in cache, create a new entry and recurse
-        sentimentCache_CreateItem(text, {})
-        topic_sentiments, adjusted_rating = sentimentCache_getSentimentAndAdjustedRating(text, original_rating, topics)
-
-    return topic_sentiments, adjusted_rating
+        return topic_sentiments, adjusted_rating
