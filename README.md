@@ -152,25 +152,31 @@ download additional files. The operation is long but it takes place once.
 
 Gaussianiser saves a number of files while running and put them in different
 directories to help keeping data in order.
+Moreover, it also caches data to reduce recalculation to a minimum in case of multiple runs.
 
-First, the name of the review file is used to create a subdirectory for storing
-all the related data. For example, if the file is **magazines.jsonl**, then
-gaussianiser will create a subdirectory **magazines**.
+## Cache files
 
-While running, gaussianiser stores two files in this subdir:
-- cache of embeddings in pickle format (very efficient with number sequences)
-- the original and adjusted scores in csv format
+If the topic file is called **topic**.jsonl, then Gaussianiser creates these cache files under subdirectory **topic**:
 
-Their filenames contain the review filename, so for **magazines** they will be
+- **topic**_embeddings_cache.pkl  
+  A dictionary that associates a word with its embeddings. Stored in pickle format.
 
-  **magazines**_embeddings_cache.pkl
+- **topic**_spellcheck_cache.json  
+  A dictionary associating each original sentence with its spellchecked version. Caching the spellcheck result reduces the processing time for this intensive operation.
 
-and
+- **topic**_correction_cache.json  
+  A dictionary that associates each word with its corrected form. The file contains only words that were corrected. This cache minimizes the repeated work of spell checking.
 
-  **magazines**_results.csv
+- **topic**_preprocessing_cache.json  
+  A dictionary where each corrected sentence is associated with tokens extracted during preprocessing (tokenized nouns) and the original score.
 
-Gaussianiser also creates a sub-subdirectory named after the seed value, and
-stores there the cache of llm-based sentiment analysis, like in:
+- **topic**_sentiment_cache.jsonl  
+  A dictionary where each corrected sentence is associated with the terms to use for sentiment analysis and the resulting score.
+
+- **topic**_results.csv  
+  Contains the original and reranked scores along with additional details.
+
+Gaussianiser also creates a sub-subdirectory named after the seed value and stores there the cache of LLM-based sentiment analysis, for example:
 
   **magazines**_sentiments_cache.jsonl
 

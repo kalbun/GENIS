@@ -3,25 +3,28 @@ import time
 import argparse
 import matplotlib.pyplot as plt
 import numpy as np
+import re
 
-from preprocessing import (
-    load_reviews, preprocess_reviews,
-    preprocessingCache_init
-)
+from preprocessing import ReviewPreprocessor
 from embeddings import EmbeddingsManager
+
+import spacy
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
 
 from sentiments import (
     sentimentCache_init,
     sentimentCache_getSentimentAndAdjustedRating,
     sentiment_aggregateSimilarTopics,
     sentiment_returnMostRelevantTopic,
-    sentiment_getTypicalTopics
+    sentiment_getTypicalTopics,
+    sentiment_topicsFromSentence,
 )
 
 embeddingManager: EmbeddingsManager = None
+preprocessor: ReviewPreprocessor = None
 
 def main():
-    ver = "0.7.0-experimental"
+    ver = "0.8.0-experimental"
     print(f"Amazon Cluster Analysis v{ver}")
     parser = argparse.ArgumentParser()
     parser.add_argument("filename", type=str, help="Jsonl file to process including extension")
@@ -56,7 +59,7 @@ def main():
     # Set cache files (shared amongst the modules)
     sentiments_cache_file = os.path.join(topicAndSeed, f"{topicGeneral}_sentiments_cache.json")
     embeddings_cache_file = os.path.join(topicGeneral, f"{topicGeneral}_embeddings_cache.pkl")
-    preprocessing_cache_file = os.path.join(topicGeneral, f"{topicGeneral}_preprocessing_cache.json")
+    preprocessing_cache_prefix = os.path.join(topicGeneral, topicGeneral)
     # Set result file (csv format, containing original and adjusted ratings)
     result_file = os.path.join(topicGeneral, f"{topicGeneral}_results.csv")
 
@@ -78,14 +81,20 @@ Files are stored in the following structure (see README.md for details):
         embeddings_cache_file=embeddings_cache_file,
         prevent_cache=args.bypass
     )
+    preprocessor = ReviewPreprocessor(preprocessing_cache_prefix)
 
     # Initialize sentiment cache
     sentimentCache_init(sentiments_cache_file, args.bypass)
     # Initialize preprocessing cache
-    preprocessingCache_init(preprocessing_cache_file)
 
     label_text = "text"
     label_rating = "rating"
+
+    # Load the SpaCy model
+    nlp = spacy.load("en_core_web_sm")
+    # Initialize the VADER sentiment analyzer
+    sid = SentimentIntensityAnalyzer()
+    reviewTopicFile = os.path.join(topicAndSeed, f"{topicGeneral}_topics.json")
 
     # Starting from this point, the code is repeated for each run
     for run in range(args.runs):
@@ -103,14 +112,142 @@ Files are stored in the following structure (see README.md for details):
         specific_clusters: list[tuple] = []
         aggregated_clusters: list[tuple] = []
 
+        pairs: list[tuple[str, str]] = []
+        nouns: list[str] = []
+
         print(f"Run {run + 1}/{args.runs}")
         # Load a random sample of reviews from the file, preprocess them, then
         # calculate the embeddings of the words found in the reviews.
-        original_reviews, original_indices = load_reviews(file_path, args.max_reviews, label_text, label_rating,seed)
+        original_reviews, original_indices = preprocessor.load_reviews(file_path, args.max_reviews, label_text, label_rating,seed)
 #        preprocessed_reviews = preprocess_and_extract_topics(original_reviews)
 
-        print("Preprocessing reviews...", end="")
-        preprocessed_reviews = preprocess_reviews([review["text"] for review in original_reviews])
+        print("Preprocessing reviews...")
+        # Build a dict mapping review text to its rating. This is useful to save the data in the cache.
+        reviews_dict: dict[str, float] = {str(review[label_text]): review[label_rating] for review in original_reviews}
+        preprocessed_reviews = preprocessor.preprocess_reviews(reviews_dict)        # Updated: use the preprocessor instance
+
+        # Extract adjective-noun pairs
+        for review in preprocessed_reviews.keys():
+            # Initialize the list for this review
+            # Avoid splitting the sentence when the period is part of an abbreviation
+            review = review.replace("dr.", "dr").replace("mr.", "mr").replace("prof.", "prof")
+            review = review.replace("etc.", "etc").replace("e.g.", "eg").replace("i.e.", "ie")
+            reviews_dict[review] = []
+
+            # split sentences on hard punctuation (periods, exclamation marks, question marks)
+            sentences = re.split(r'(?<=[.!?]) +', review)
+            for sentence in sentences:
+                sentence = sentence.strip()
+                if len(sentence) < 4:
+                    continue
+                # Process the sentence with SpaCy
+                doc = nlp(sentence)
+                pairs = []
+                nouns = []
+                for token in doc:
+                    if token.pos_ == "NOUN":
+                        for child in token.children:
+                            if child.pos_ == "ADJ":
+                                pairs.append((token.text, child.text))
+                                nouns.append(token.text)
+                nouns = sorted(list(set(nouns)))
+                reviews_dict[review].append({"sentence": sentence, "nouns": nouns, "pairs": pairs})
+
+
+
+
+        import json
+
+        listOfTopics: dict[str,str] = {}
+        # Loads the topics from the file if it exists
+        if os.path.exists(reviewTopicFile):
+            with open(reviewTopicFile, "rt", encoding="utf-8") as f:
+                json_data = f.read()
+                if json_data != "":
+                    listOfTopics = json.loads(json_data)                    
+
+        # Invoke the LLM to get the typical topics for the reviews
+        print("Invoking LLM to get typical topics...", end="")
+        for item in preprocessed_reviews.values():
+            sublistofTopics: list[str] = []
+            review: str = item["corrected"]
+            if review in listOfTopics:
+                # Skip reviews already processed
+                continue
+            # preprocess the review to avoid splitting on forms like dr., mr., prof., etc.
+            review = review.replace("dr.", "dr").replace("mr.", "mr").replace("prof.", "prof")
+            review = review.replace("etc.", "etc").replace("e.g.", "eg").replace("i.e.", "ie")
+            for sentence in review.split("."):
+                # Skip empty sentences
+                if len(sentence.strip()) < 4:
+                    continue
+                try:
+                    topics: list[str] = sentiment_topicsFromSentence(sentence)
+                    if len(topics) == 0:
+                        continue
+                    # Filter out single-character topics (likely letters)
+                    for topic in topics:
+                        if (topic is not None) and (len(topic) > 1):
+                            sublistofTopics.append(topic)
+                except Exception as e:
+                    print(f"Error: {e}")
+            listOfTopics[review] = sublistofTopics
+
+        # Remove duplicates and empty strings
+        listOfTopics = {k: list(set(filter(None, v))) for k, v in listOfTopics.items()} 
+        print(" done.")
+        # Save the topics to the file
+        with open(reviewTopicFile, "wt", encoding="utf-8") as f:
+            json.dump(listOfTopics, f, ensure_ascii=False, indent=4)
+        f.close()
+
+        bagOfWords = [term for topic in listOfTopics.values() for term in topic]
+        # Remove duplicates and empty strings   
+        bagOfWords = list(set(filter(None, bagOfWords)))
+        # correct and lemmatize using the preprocessor (LLM may return words in different forms)
+        # Before invoking the function, we are obliged to create a fake dict, because
+        # the function expects a dict as input.
+        word_dict: dict[str, float] = {word: 0 for word in bagOfWords}
+        bagOfWords = preprocessor.preprocess_reviews(word_dict)
+        # The function returns a dict, so we need to extract the keys
+        # This is cumbersome, maybe we can write a different function to do this...
+        bagOfWords = list(bagOfWords.keys())
+
+        # Remove duplicates and empty strings   
+        bagOfWords = list(set(filter(None, bagOfWords)))
+        # add topics to embedding cache
+        embeddingManager.cacheTopicEmbeddings(bagOfWords)
+        # calculate sentence embeddings for the reviews
+        print("Calculating sentence embeddings...", end="")
+
+        from sentence_transformers import SentenceTransformer
+        emb_model = SentenceTransformer('all-MiniLM-L6-v2')
+
+        # Calculate the embeddings for the reviews
+        reviewsEmbeddings: dict[str, list[float]] = {}
+        corrected_reviews: dict[str, str] = {}
+        corrected_reviews = {review: item["corrected"] for review, item in preprocessed_reviews.items()}
+        embeddings = emb_model.encode(list(review for review in corrected_reviews), show_progress_bar=True, device="cpu")
+        # Store the embeddings in a dictionary, associating each review with its embedding
+        # This is not necessary, but it allows to check the embeddings for each review
+        reviewsEmbeddings = {review: embedding for review, embedding in zip(corrected_reviews, embeddings)}
+
+        # reviewsEmbeddings now associates the review with its embedding
+        # Now for each review embeddings, extract the three most relevant topics,
+        # using the semantic similarity.
+        topicsPerReview: dict[str, list[str]] = {}
+        for idx, (review, embeddings) in enumerate(reviewsEmbeddings.items()):
+            # Get the topics for each review
+            distances: dict[str, float] = {}
+            for word in bagOfWords:
+                # Calculate the semantic similarity between the review and the topic
+                distances[word] = embeddingManager.getSimilarityDistance(embeddings, embeddingManager.getEmbedding(word))
+            # Sort the distances and get the three most relevant topics
+            # Get the three most relevant topics    
+            relevant_topics = [topic for topic, distance in sorted(distances.items(), key=lambda x: x[1]) if distance <= 0.5][:3]
+            # Save the topics in the dictionary
+            topicsPerReview[review] = relevant_topics
+
 
         bagOfWords = [term for review in preprocessed_reviews for term in review.split()]
         # add specific and general topics to the bag of words
@@ -119,8 +256,12 @@ Files are stored in the following structure (see README.md for details):
         bagOfWords.extend(typicalTopics)
         bagOfWords.extend("purchase")
         print(" completed.")
+        bagOfWords = list(set(filter(None, bagOfWords)))
         # Cache the embeddings of the words found in the reviews
         embeddingManager.cacheTopicEmbeddings(bagOfWords)
+
+
+
 
         # Extract the topics semantically related to the general topic of the reviews.
         print(f"Extracting review-specific topics (similarity threshold {args.threshold})")
