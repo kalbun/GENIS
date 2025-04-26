@@ -331,16 +331,11 @@ class Sentiments:
         retry_counter: int = 0
         model: str = "mistral-small-latest"
         prompt: str = textwrap.dedent(f"""
-                Read this Amazon review and rate customer experience
+                Read this Amazon review and rate experience
                 from 1 to 10, where 1 worst experience, 10 best.
                 You can use half scores like 6.5.
-                RETURN ONLY SCORE. NO COMMENTS, EXPLANATIONS, OR ANYTHING ELSE!!!
-                
-                Calibration examples:
-                1) 'Such a shit! Object broken, package damaged and seller did not answer. NEVER AGAIN!!!!' -> 1.0 to 2.0
-                2) 'The best music of my life! Great service and fantastic seller!' -> 9 to 10.0
-                3) 'The cd is decent' -> 6.0 to 6.5
-                4) Not an exceptional rubber duck, but it is nice and works' -> 7.0 to 7.5
+                Be moderate with scores.
+                RETURN ONLY SCORE. NO COMMENTS OR ANYTHING ELSE!!!
                 ---
                 Review to score:
                 {review}""")
@@ -394,7 +389,7 @@ class Sentiments:
                 Your task is to
                 1) search list of topics in a review text
                 2) calculate sentiment of each topic in text as score
-                    -1 (very negative), 0 (neutral/not found), 1 (very positive).
+                    -1 (negative), 0 (neutral/not found), 1 (positive).
                 3) return sentiments as JSON object. ONLY JSON. No comments, explanations, anything else.
 
                 Example 1:
@@ -405,6 +400,7 @@ class Sentiments:
                         "cd": 0,
                         "cover": 0
                     }}
+                    Why: cd neutral, cover not found.
 
                 Example 2:
                     text: 'Gosh, the cd is... bombastic! But the cover is awful :-('
@@ -414,6 +410,7 @@ class Sentiments:
                         "cd": 1,
                         "cover": -1
                     }}
+                    Why: cd positive, cover negative.
 
                 ---
                 TEXT:
