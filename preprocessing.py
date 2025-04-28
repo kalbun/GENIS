@@ -231,7 +231,9 @@ class ReviewPreprocessor:
                 .replace("&#34;", "'")
                 .replace("&#39;", "'")
                 .replace("<br />", " ")
-                .replace("&nbsp;","")
+                .replace("&nbsp;","") \
+                .replace("\u2022", "*") \
+                .replace("&quot;", "'") \
             )
 
             # Now do a heavier preprocessing of the reviews.
@@ -250,14 +252,14 @@ class ReviewPreprocessor:
                 self.preprocessing_cache[rawReview].update({
                     'readable': readableReviews,
                     'corrected': correctedReview,
-                    'tokens': self.preprocessing_cache[rawReview].get('tokens', ""),  # Preserve existing tokens if present.
+#                    'tokens': self.preprocessing_cache[rawReview].get('tokens', ""),  # Preserve existing tokens if present.
                     'score': reviews[rawReview]
                 })
             else:
                 self.preprocessing_cache[rawReview] = {
                     'readable': readableReviews,
                     'corrected': correctedReview,
-                    'tokens': "",  # This field will be filled after tokenization.
+#                    'tokens': "",  # This field will be filled after tokenization.
                     'score': reviews[rawReview]
                 }
 
@@ -289,7 +291,8 @@ class ReviewPreprocessor:
             ).strip()
 
         # Process reviews to obtain lemmatized tokens and filter based on POS and stopwords.
-        for idx, rawReview in enumerate(reviews):
+        while False:
+#        for idx, rawReview in enumerate(reviews):
             if idx and (idx % 100 == 0):
                 print(".", end="", flush=True)
                 self.SavePreprocessingCache()
