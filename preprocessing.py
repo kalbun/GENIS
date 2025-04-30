@@ -1,6 +1,7 @@
 import os
 import json
 import random
+import html
 import re
 from spellchecker import SpellChecker
 import nltk
@@ -191,13 +192,22 @@ class ReviewPreprocessor:
         return [self.LemmatizeText(text) for text in texts]
 
     # ---------------------- Preprocessing Methods ---------------------- #
+    @staticmethod
+    def FixEncoding(text: str) -> str:
+        try:
+            # Try to decode from Windows-1252 to UTF-8
+            return text.encode('windows-1252').decode('utf-8')
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            # If decoding fails, return the original text
+            return text
+
     def PreprocessReviews(self, reviews: dict[str, float]) -> dict[str, dict]:
         """
         Preprocess review texts by correcting, tokenizing, lemmatizing, and spelling correction.
 
         The method applies the following steps:
         1. Correct contractions and perform lowercasing.
-        2. Remove unwanted characters and extra whitespace.
+        2. unescape HTML and attempt to fix encoding issues.
         3. Generate a correction cache for misspelled words.
         4. Tokenize texts, apply POS tagging and lemmatization.
         5. Filter tokens by stopwords, token length, and word type.
@@ -223,22 +233,19 @@ class ReviewPreprocessor:
                 continue
 
             # Apply a light preprocessing to make it more human-readable.
-            readableReviews = (
-                rawReview \
+            readableReview = self.FixEncoding(rawReview)
+            readableReview = html.unescape(readableReview)
+            readableReview = (
+                readableReview \
                 .replace("\n", ". ")
                 .replace("\r", ". ")
                 .replace("\t", " ")
-                .replace("&#34;", "'")
-                .replace("&#39;", "'")
                 .replace("<br />", " ")
-                .replace("&nbsp;","") \
-                .replace("\u2022", "*") \
-                .replace("&quot;", "'") \
             )
 
             # Now do a heavier preprocessing of the reviews.
             # Note how we remove periods, to avoid splitting issues later on.
-            correctedReview = fix(readableReviews.lower())
+            correctedReview = fix(readableReview.lower())
             correctedReview = re.sub(r'[^A-Za-z0-9.?!]+', ' ', correctedReview)
             correctedReview = re.sub(r'([!?])\1+', r'\1', correctedReview)
             correctedReview = correctedReview.replace("mr.", "mister") \
@@ -250,16 +257,14 @@ class ReviewPreprocessor:
 
             if rawReview in self.preprocessing_cache:
                 self.preprocessing_cache[rawReview].update({
-                    'readable': readableReviews,
+                    'readable': readableReview,
                     'corrected': correctedReview,
-#                    'tokens': self.preprocessing_cache[rawReview].get('tokens', ""),  # Preserve existing tokens if present.
                     'score': reviews[rawReview]
                 })
             else:
                 self.preprocessing_cache[rawReview] = {
-                    'readable': readableReviews,
+                    'readable': readableReview,
                     'corrected': correctedReview,
-#                    'tokens': "",  # This field will be filled after tokenization.
                     'score': reviews[rawReview]
                 }
 
