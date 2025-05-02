@@ -5,6 +5,7 @@ import html
 import re
 from spellchecker import SpellChecker
 import nltk
+import ftfy
 
 from nltk import pos_tag
 from nltk.corpus import stopwords, wordnet
@@ -192,15 +193,6 @@ class ReviewPreprocessor:
         return [self.LemmatizeText(text) for text in texts]
 
     # ---------------------- Preprocessing Methods ---------------------- #
-    @staticmethod
-    def FixEncoding(text: str) -> str:
-        try:
-            # Try to decode from Windows-1252 to UTF-8
-            return text.encode('windows-1252').decode('utf-8')
-        except (UnicodeEncodeError, UnicodeDecodeError):
-            # If decoding fails, return the original text
-            return text
-
     def PreprocessReviews(self, reviews: dict[str, float]) -> dict[str, dict]:
         """
         Preprocess review texts by correcting, tokenizing, lemmatizing, and spelling correction.
@@ -233,8 +225,9 @@ class ReviewPreprocessor:
                 continue
 
             # Apply a light preprocessing to make it more human-readable.
-            readableReview = self.FixEncoding(rawReview)
-            readableReview = html.unescape(readableReview)
+            readableReview = ftfy.fix_text(rawReview) # Take care of wrongly encoded characters
+            readableReview = html.unescape(readableReview) # unescape HTML entities like &#34;
+            readableReview = html.unescape(readableReview) # secord unescape to fix cases like &amp;#34;
             readableReview = (
                 readableReview \
                 .replace("\n", ". ")
