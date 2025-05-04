@@ -370,16 +370,22 @@ class Sentiments:
 
         return score
 
-    def parseScore(self, text: str, topics: list[str]) -> dict:
+    def parseScore(self, text: str, topics: list[str]) -> tuple[dict, str]:
         """
         Parse the sentiment of the review text using the LLM model.
         
         :param text: the review text
         :param topics: the topics to consider for sentiment analysis
-        :return: the sentiments of the review text as a dictionary
+        :return: a tuple of (topic sentiment dictionary, return state)
+        The return state can be:
+            - "C": cached data
+            - "_": data parsed from the LLM
+            - "J": JSON parsing error
+            - "E": exception occurred
         """
         output: dict = {}
         retry_counter: int = 0
+        returnState: str = "N"
         prompt: str = ""
         
         #    if not any(topic.lower() in text.lower() for topic in topics):
@@ -429,8 +435,7 @@ class Sentiments:
             if 'sentiments' in cached_data:
                 # if sentiments are cached, check if adjusted rating is cached
                 output = cached_data['sentiments']
-                print("C", end="", flush=True)
-                return output
+                return output, 'C'
 
         while (retry_counter < 3):
             try:
@@ -462,18 +467,19 @@ class Sentiments:
                             # update the sentiment cache with the parsed output
                             self.sentimentCache_updateSentiment(text, output)
                             self.sentimentCache_Save()
+                            returnState = "_"
                     except json.JSONDecodeError:
-                        print("J", end="", flush=True)
+                        returnState = "J"
                     break
             except SDKError:
                 retry_counter += 1
                 continue
-            except Exception:
+            except Exception as e:
                 # exit
-                print("E", end="", flush=True)
+                returnState = "E"
                 break  # empty output
 
-        return output
+        return output, returnState
 
     def sentimentCache_getSentimentAndAdjustedRating(self, text: str, original_rating: float, topics: list[str], forceRandom: bool = False) -> tuple[dict, float]:
         """
