@@ -335,7 +335,7 @@ data
                     })
 
     print(f"\nSelected reviews saved in {selected_reviews_file}.")
-    print(f"Please add the human scores to {selected_reviews_file}, then run script gauTrain.py.")
+    print(f"Please add the human scores to {selected_reviews_file}, then run script genisTrain.py.")
 
 if __name__ == "__main__":
     main()
