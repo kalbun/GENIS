@@ -1,3 +1,4 @@
+print("\nStarting...")
 import os
 import json
 import random
@@ -6,6 +7,7 @@ import re
 from spellchecker import SpellChecker
 import nltk
 import ftfy
+import emoji
 
 from nltk import pos_tag
 from nltk.corpus import stopwords, wordnet
@@ -193,7 +195,7 @@ class ReviewPreprocessor:
         return [self.LemmatizeText(text) for text in texts]
 
     # ---------------------- Preprocessing Methods ---------------------- #
-    def PreprocessReviews(self, reviews: dict[str, float]) -> dict[str, dict]:
+    def PreprocessReviews(self, reviews: dict[str, float], callback = None) -> dict[str, dict]:
         """
         Preprocess review texts by correcting, tokenizing, lemmatizing, and spelling correction.
 
@@ -208,6 +210,10 @@ class ReviewPreprocessor:
         Args:
             reviews (dict[str, float]): Dictionary where each key is a review text
                                         and value is its associated score.
+            callback (function, optional): A callback function to be called after
+            each review is processed. The function must accept two arguments:
+                - index (int): The index of the review in the list.
+                - total (int): The total number of reviews.
 
         Returns:
             dict[str, dict]: Mapping of original review texts to their processed data.
@@ -218,7 +224,6 @@ class ReviewPreprocessor:
         stop_words: set = set(stopwords.words('english'))
         spell_checker: SpellChecker = SpellChecker()
         spell_checker.word_frequency.load_words(stop_words)
-
 
         for rawReview in reviews:
             if rawReview in self.preprocessing_cache:
@@ -235,6 +240,8 @@ class ReviewPreprocessor:
                 .replace("\t", " ")
                 .replace("<br />", " ")
             )
+            # remove emojis - this proved to be more difficult than expected!
+            readableReview = emoji.replace_emoji(readableReview, replace="")
 
             # Now do a heavier preprocessing of the reviews.
             # Note how we remove periods, to avoid splitting issues later on.
@@ -272,11 +279,14 @@ class ReviewPreprocessor:
 
         # Update correction cache with spell corrections.
         for idx, word in enumerate(bag_of_words):
-            if idx and (idx % 100 == 0):
-                self.SaveCorrectionCache()
             if word not in self.correction_cache:
                 corrected_word: str = spell_checker.correction(word)
                 self.correction_cache[word] = corrected_word if corrected_word and corrected_word != word else word
+                if idx and (idx % 100 == 0):
+                    self.SaveCorrectionCache()
+            # This is the longest operation
+            if callback:
+                callback(idx, len(bag_of_words))
         self.SaveCorrectionCache()
 
         # Update the corrected sentence based on the correction cache.
@@ -287,30 +297,6 @@ class ReviewPreprocessor:
                 for word in correctedReview.split()
 #                if not any(char.isdigit() for char in word)
             ).strip()
-
-        # Process reviews to obtain lemmatized tokens and filter based on POS and stopwords.
-        while False:
-#        for idx, rawReview in enumerate(reviews):
-            if idx and (idx % 100 == 0):
-                print(".", end="", flush=True)
-                self.SavePreprocessingCache()
-            # Process only if tokens have not been computed yet.
-            if self.preprocessing_cache[rawReview]["tokens"]:
-                continue
-
-            # Use the new LemmatizeText method to obtain the lemmatized sentence.
-            lemmatized_sentence = self.LemmatizeText(self.preprocessing_cache[rawReview]["corrected"])
-            # Tokenize and POS tag the lemmatized sentence.
-            pos_tags = pos_tag(word_tokenize(lemmatized_sentence))
-            # Filter out tokens that are not nouns, are stopwords, or are too short.
-            filtered_tokens = [
-                word for word, tag in pos_tags
-                if tag.startswith('N') and word not in stop_words and len(word) > 1
-            ]
-            # Ensure tokens are unique.
-            filtered_tokens = list(set(filtered_tokens))
-            filtered_sentence = " ".join(filtered_tokens)
-            self.preprocessing_cache[rawReview]["tokens"] = filtered_sentence
 
         self.SavePreprocessingCache()
 
@@ -325,7 +311,8 @@ class ReviewPreprocessor:
 
     # ---------------------- Review Loader ---------------------- #
     def LoadReviews(self, file_path: str, max_reviews: int,
-                    label_text: str, label_rating: str, seed: int) -> tuple[list[dict], set[int]]:
+                    label_text: str, label_rating: str, seed: int,
+                    callback: None) -> tuple[list[dict], set[int]]:
         """
         Load reviews from a file and select a random subset.
 
@@ -338,6 +325,10 @@ class ReviewPreprocessor:
             label_text (str): Key name for the review text in the JSON.
             label_rating (str): Key name for the review rating in the JSON.
             seed (int): Random seed value for reproducibility.
+            callback (function, optional): A callback function to be called after
+            each review is processed. The function must accept two arguments:
+                - index (int): The index of the review in the list.
+                - total (int): The total number of reviews.
 
         Returns:
             tuple: A tuple containing:
@@ -374,5 +365,7 @@ class ReviewPreprocessor:
                     })
             except json.JSONDecodeError:
                 continue
+            if callback:
+                callback(len(reviews), max_reviews)
 
         return reviews, random_indices
