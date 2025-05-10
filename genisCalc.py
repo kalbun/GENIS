@@ -276,32 +276,56 @@ data
         print(f"{len(filtered_reviews_dict)} of {len(reviews_dict)} have relevant sentiments.")
 
         #
-        # In this last step, we invoke a LLM to parse the sentiment score, the so-called "L-score".
-        # The LLM will be asked to parse the review text and the noun list, and return a score.
+        # In this last step, we invoke a LLM to parse the sentiment score.
+        # In fact, we ask to tasks to the LLM:
+        # 1. Parse the review text and the noun list, and return a score.
+        # 2. Assign directly a score to the review text using a zero-shot approach.
         #
         index = 0
-        print("\nCalculating LLM scores for the reviews...")
+        print("\nCalculating LLM scores for the reviews.")
         # Iterate through each review in the filtered_reviews_dict
+        print("Approach 1: LLM parsing of score for each relevant noun.")
+        print("_ = calculated, C = cached, E = error, J = json error")
         for rawReview, rawReviewData in filtered_reviews_dict.items():
             # Invoke parseScore() and store the result in the dictionary
             parsed_scores[rawReview], state = sentimentsManager.parseScore(rawReviewData["readable"], rawReviewData["nouns"])
             print(f"{state}", end="")
+            index += 1
+            if (index and (index % 100) == 0):
+                print(f" {index} of {len(filtered_reviews_dict)}")
+            # If the state is "E" or "J", skip the review and continue to the next one.
+            if state == "E" or state == "J":
+                continue
             # Calculate the LLM score as the sum of the parsed scores, then
             # add it to the review dictionary.
             plusValues = sum([score for score in parsed_scores[rawReview].values() if score > 0])
             minusValues = sum([score for score in parsed_scores[rawReview].values() if score < 0])
             neutralValues = sum([score for score in parsed_scores[rawReview].values() if score == 0])
-            llm_score = sum(parsed_scores[rawReview].values())
+            methodScore = sum(parsed_scores[rawReview].values())
             # Update the review dictionary with the LLM score
-            rawReviewData["L-score"] = llm_score
+            rawReviewData["L-score"] = methodScore
             rawReviewData["L-scoreP"] = plusValues
             rawReviewData["L-scoreM"] = minusValues
             rawReviewData["L-scoreN"] = neutralValues
             # Add the LLM score to the cache
-            preprocessor.AddSubitemsToReviewCache(rawReview, {"L-score": llm_score})
+            preprocessor.AddSubitemsToReviewCache(rawReview, {"L-score": methodScore})
             preprocessor.AddSubitemsToReviewCache(rawReview, {"L-scoreP": plusValues})
             preprocessor.AddSubitemsToReviewCache(rawReview, {"L-scoreM": minusValues})
             preprocessor.AddSubitemsToReviewCache(rawReview, {"L-scoreN": neutralValues})
+        print("\nApproach 2: LLM zero-shot score for the review.")
+        print("_ = calculated, C = cached, E = error")
+        index = 0
+        for rawReview, rawReviewData in filtered_reviews_dict.items():
+            grade, state = sentimentsManager.assignGradeToReview(rawReviewData["readable"])
+            print(f"{state}", end="")
+            index += 1
+            if (index and (index % 100) == 0):
+                print(f" {index} of {len(filtered_reviews_dict)}")
+            # If the state is "E", skip the review and continue to the next one.
+            if state == "E":
+                continue
+            # Update the review dictionary with the LLM score
+            rawReviewData["LLM-score"] = grade
         print("\nDone.")
 
         # Save a subset of 100 reviews to a CSV file for human grading and further processing.
