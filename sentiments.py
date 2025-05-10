@@ -97,12 +97,20 @@ class Sentiments:
     def updateLLMscore(self, item: str, score: float):
         """
         Update the LLM score for the given item in the cache.
+        If the item does not exist, this methods does nothing.
         
         :param item: the item to update in the cache
         :param score: the LLM score to set in the cache
         """
         if self.sentimentCacheSemaphore.acquire():
-            self.sentimentCache[item]['LLMscore'] = score
+            # Update or create the item with the provided LLM score
+            if item in self.sentimentCache:
+                if 'LLMscore' in self.sentimentCache[item]:
+                    # If the LLM score already exists, update it
+                    self.sentimentCache[item]['LLMscore'] = score
+                else:
+                    # If the LLM score does not exist, create it
+                    self.sentimentCache[item]['LLMscore'] = score
             self.sentimentCacheSemaphore.release()
 
     def updateOriginalRating(self, item: str, originalRating: float, newRating: float):
