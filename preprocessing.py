@@ -41,15 +41,15 @@ class ReviewPreprocessor:
         self.correction_cache: dict = {}
         self.preprocessing_cache_file: str = os.path.join(cachePath, "preprocessing_cache.json")
         self.correction_cache_file: str = os.path.join(cachePath, "correction_cache.json")
-        self.LoadPreprocessingCache()
-        self.LoadCorrectionCache()
+        self.loadPreprocessingCache()
+        self.loadCorrectionCache()
 
     def __del__(self):
             # Save cache when the instance is being destroyed
-            self.cacheSave()
+            self.savePreprocessingCache()
 
     # ---------------------- Cache Methods ---------------------- #
-    def LoadPreprocessingCache(self) -> dict:
+    def loadPreprocessingCache(self) -> dict:
         """
         Load the preprocessing cache from disk if it exists.
 
@@ -64,7 +64,7 @@ class ReviewPreprocessor:
                 pass
         return self.preprocessing_cache
 
-    def SavePreprocessingCache(self):
+    def savePreprocessingCache(self):
         """
         Save the current preprocessing cache to disk.
         """
@@ -74,7 +74,7 @@ class ReviewPreprocessor:
         except Exception:
             pass
 
-    def LoadCorrectionCache(self) -> dict:
+    def loadCorrectionCache(self) -> dict:
         """
         Load the correction cache from disk if it exists.
 
@@ -129,7 +129,7 @@ class ReviewPreprocessor:
             self.preprocessing_cache[review][key] = value
         else:
             self.preprocessing_cache[review] = {key: value}
-        self.SavePreprocessingCache()
+        self.savePreprocessingCache()
 
     def AddSubitemsToReviewCache(self, review: str, subitems: dict) -> None:
         """
@@ -143,7 +143,7 @@ class ReviewPreprocessor:
             self.preprocessing_cache[review].update(subitems)
         else:
             self.preprocessing_cache[review] = subitems
-        self.SavePreprocessingCache()
+        self.savePreprocessingCache()
 
     # ---------------------- Helper Methods ---------------------- #
     @staticmethod
@@ -302,7 +302,7 @@ class ReviewPreprocessor:
 #                if not any(char.isdigit() for char in word)
             ).strip()
 
-        self.SavePreprocessingCache()
+        self.savePreprocessingCache()
 
         # Return only preprocessed reviews that exist in the original input.
         preprocessed_reviews = {
