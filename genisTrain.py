@@ -10,6 +10,7 @@ import os
 import argparse
 import datetime
 from sklearn.model_selection import train_test_split
+from scipy.stats import pearsonr
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import mean_squared_error, r2_score, f1_score
 from preprocessing import ReviewPreprocessor
@@ -29,7 +30,7 @@ Reviews: list[str] = []
 X: list[list[float,float,float,float]] = []
 Y: list[float] = []
 V_scores: list[float] = []
-
+LLM_scores: list[float] = []
 
 helpMessage = """\
 GENIS - Grading with Explainability and No Intrinsic Saturation
@@ -93,24 +94,30 @@ for path in args.paths:
             cached_data = preprocessor.GetReviewFromCache(review)
             if cached_data:
                 O_score = cached_data.get("score", 0)
-                L_scoreP = cached_data.get("L-scoreP", 0)
-                L_scoreM = cached_data.get("L-scoreM", 0)
-                L_scoreN = cached_data.get("L-scoreN", 0)
+                parsed_scores = cached_data.get("parsed_scores", {})
+                # Extract the scores from the parsed scores dictionary
+                L_scoreP = sum([score for score in parsed_scores.values() if score > 0])
+                L_scoreM = sum([score for score in parsed_scores.values() if score < 0])
+                L_scoreN = sum([score for score in parsed_scores.values() if score == 0])
+                # Update the review dictionary with the LLM score
                 V_score = cached_data.get("V-Whole", 0)
-
+                LLM_score = cached_data.get("LLM-score", 0)
                 # Append features to X and target to Y
+                # Note that LLM score is not used in the model, but it is included for
+                # later statistical analysis.
                 X.append([O_score, L_scoreP, L_scoreM, L_scoreN])
                 # Convert human score to string to force the regressor to
                 # work to a classification problem instead of a regression one.
                 Y.append(str(hscore))
                 Reviews.append(cached_data.get("readable", ""))
                 V_scores.append(V_score)
+                LLM_scores.append(LLM_score)
                 counter += 1
 
     print(f"Loaded {counter} reviews from {filePath}")
 
 # Split the data into training and testing sets (80% train, 20% test)
-X_train, X_test, Y_train, Y_test, Rev_train, Rev_test, V_train, V_test = train_test_split(X, Y, Reviews, V_scores, test_size=0.20, random_state=args.seed)
+X_train, X_test, Y_train, Y_test, Rev_train, Rev_test, V_train, V_test, LLM_train, LLM_test = train_test_split(X, Y, Reviews, V_scores, LLM_scores, test_size=0.20, random_state=args.seed)
 
 model = RandomForestClassifier(n_estimators=16, min_samples_split=5, random_state=args.seed)
 print(f"Training model with {len(X_train)} samples")
@@ -122,21 +129,45 @@ Y_pred = model.predict(X_test)
 # Evaluate the model
 mse = mean_squared_error(Y_test, Y_pred)
 r2 = r2_score(Y_test, Y_pred)
-print(f"Model evaluation on training set:")
-print(f"F1 Score: {f1_score(Y_train, model.predict(X_train), average='weighted'):.2f}")
-print(f"Model evaluation on test set:")
-print(f"F1 Score: {f1_score(Y_test, Y_pred, average='weighted'):.2f}")
-# calculate micro and macro f1 scores
-print(f"Micro F1 Score: {f1_score(Y_test, Y_pred, average='micro'):.2f}")
-print(f"Macro F1 Score: {f1_score(Y_test, Y_pred, average='macro'):.2f}")
-
-
+print("Evaluation metrics, F1 with human baseline:")
+print("Params\tweight\tmicro\tmacro\tPearson")
+print(f"Train\t{f1_score(Y_train, model.predict(X_train), average='weighted'):.2f}",end="")
+print(f"\t{f1_score(Y_train, model.predict(X_train), average='micro'):.2f}",end="")
+print(f"\t{f1_score(Y_train, model.predict(X_train), average='macro'):.2f}",end="")
+print(f"\t{pearsonr([float(y) for y in Y_train], [float(y) for y in model.predict(X_train)])[0]:.2f}")
+print(f"Test\t{f1_score(Y_test, Y_pred, average='weighted'):.2f}",end="")
+print(f"\t{f1_score(Y_test, Y_pred, average='micro'):.2f}",end="")  
+print(f"\t{f1_score(Y_test, Y_pred, average='macro'):.2f}",end="")
+print(f"\t{pearsonr([float(y) for y in Y_test], [float(y) for y in Y_pred])[0]:.2f}")
+V_labels = [ str(int(( (v + 1) * 3.5 + 1) * 2) / 2) for v in V_scores]  # Adjust VADER scores to match the labels
+print(f"VADER\t{f1_score(Y, V_labels, average='weighted'):.2f}",end="")
+print(f"\t{f1_score(Y, V_labels, average='micro'):.2f}",end="")
+print(f"\t{f1_score(Y, V_labels, average='macro'):.2f}",end="")
+print(f"\t{pearsonr([float(y) for y in Y], [float(y) for y in V_scores])[0]:.2f}")
+LLM_labels = [ str(l) for l in LLM_scores]  # Adjust LLM scores to match the labels
+print(f"LLM\t{f1_score(Y,LLM_labels, average='weighted'):.2f}",end="")
+print(f"\t{f1_score(Y, LLM_labels, average='micro'):.2f}",end="")
+print(f"\t{f1_score(Y, LLM_labels, average='macro'):.2f}",end="")
+print(f"\t{pearsonr([float(y) for y in Y], [float(y) for y in LLM_scores])[0]:.2f}")
 
 # Write the contents of all files into a new CSV file
 with open('data/overall_results.csv', 'w', encoding='utf-8', newline='') as file:
     writer = csv.writer(file)
-
-    for x, y, v, review in zip(X_train, Y_train, V_train, Rev_train):
+    # Write the header
+    writer.writerow([
+        "timestamp",  # timestamp
+        "type",  # type (train/test)
+        "O-score",  # O-score
+        "L-scoreP",  # L-scoreP
+        "L-scoreM",  # L-scoreM
+        "L-scoreN",  # L-scoreN
+        "Y",  # Y (human score)
+        "Y-pred",  # Y-pred (to be filled later)
+        "VADER",  # VADER score
+        "LLM",  # LLM score
+        "review"  # review file
+    ])
+    for x, y, v, llm, review in zip(X_train, Y_train, V_train, LLM_train, Rev_train):
         writer.writerow([
             datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # timestamp
             "tr",  # type (train/test)
@@ -147,9 +178,10 @@ with open('data/overall_results.csv', 'w', encoding='utf-8', newline='') as file
             float(y),  # Y (human score)
             float(y),  # Y-pred (same as Y for training data)
             v,  # VADER score
+            llm,  # LLM score
             review,  # review file
         ])
-    for x, y, y_pred, v, review in zip(X_test, Y_test, Y_pred, V_test, Rev_test):
+    for x, y, y_pred, v, llm, review in zip(X_test, Y_test, Y_pred, V_test, LLM_test, Rev_test):
         writer.writerow([
             datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # timestamp
             "te",  # type (train/test)
@@ -160,6 +192,7 @@ with open('data/overall_results.csv', 'w', encoding='utf-8', newline='') as file
             float(y),  # Y (human score)
             float(y_pred),  # Y-pred (to be filled later)
             v,  # VADER score
+            llm,  # LLM score
             review,  # review file
         ])
 file.close()
