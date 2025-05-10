@@ -44,6 +44,10 @@ class ReviewPreprocessor:
         self.LoadPreprocessingCache()
         self.LoadCorrectionCache()
 
+    def __del__(self):
+            # Save cache when the instance is being destroyed
+            self.cacheSave()
+
     # ---------------------- Cache Methods ---------------------- #
     def LoadPreprocessingCache(self) -> dict:
         """
