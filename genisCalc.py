@@ -71,6 +71,9 @@ def main():
     args = parser.parse_args()
 
     # Process command line arguments
+    # Add the .jsonl extension if not present
+    if not args.filename.endswith(".jsonl"):
+        args.filename = os.path.splitext(args.filename)[0] + ".jsonl"
     if not os.path.exists(args.filename):
         print(f"File {args.filename} not found.")
         return
@@ -288,14 +291,31 @@ data
         print("_ = calculated, C = cached, E = error, J = json error")
         for rawReview, rawReviewData in filtered_reviews_dict.items():
             # Invoke parseScore() and store the result in the dictionary
-            parsed_scores[rawReview], state = sentimentsManager.parseScore(rawReviewData["readable"], rawReviewData["nouns"])
+            # If the data is already in the cache, use it.
+            cachedReview = preprocessor.GetReviewFromCache(rawReview)
+            if cachedReview is not None and "parsed_scores" in cachedReview:
+                # Use the cached data
+                parsed_scores = cachedReview["parsed_scores"]
+                state = "C"
+            else:
+                parsed_scores[rawReview], state = sentimentsManager.parseScore(rawReviewData["readable"], rawReviewData["nouns"])
+                # If the state is "E" or "J", skip the review and continue to the next one.
+                if state == "E" or state == "J":
+                    # Add the review to the filtered_reviews_dict with a score of 0.
+                    filtered_reviews_dict[rawReview]["L-score"] = 0
+                    filtered_reviews_dict[rawReview]["L-scoreP"] = 0
+                    filtered_reviews_dict[rawReview]["L-scoreM"] = 0
+                    filtered_reviews_dict[rawReview]["L-scoreN"] = 0
+                    # Add the parsed scores to the cache
+                    preprocessor.AddSubitemsToReviewCache(rawReview, {"parsed_scores": {}})
+                    continue
+                else:
+                    # Add the parsed scores to the cache
+                    preprocessor.AddSubitemsToReviewCache(rawReview, {"parsed_scores": parsed_scores[rawReview]})
             print(f"{state}", end="")
             index += 1
             if (index and (index % 100) == 0):
                 print(f" {index} of {len(filtered_reviews_dict)}")
-            # If the state is "E" or "J", skip the review and continue to the next one.
-            if state == "E" or state == "J":
-                continue
             # Calculate the LLM score as the sum of the parsed scores, then
             # add it to the review dictionary.
             plusValues = sum([score for score in parsed_scores[rawReview].values() if score > 0])
@@ -307,24 +327,25 @@ data
             rawReviewData["L-scoreP"] = plusValues
             rawReviewData["L-scoreM"] = minusValues
             rawReviewData["L-scoreN"] = neutralValues
-            # Add the LLM score to the cache
-            preprocessor.AddSubitemsToReviewCache(rawReview, {"L-score": methodScore})
-            preprocessor.AddSubitemsToReviewCache(rawReview, {"L-scoreP": plusValues})
-            preprocessor.AddSubitemsToReviewCache(rawReview, {"L-scoreM": minusValues})
-            preprocessor.AddSubitemsToReviewCache(rawReview, {"L-scoreN": neutralValues})
+
         print("\nApproach 2: LLM zero-shot score for the review.")
         print("_ = calculated, C = cached, E = error")
         index = 0
         for rawReview, rawReviewData in filtered_reviews_dict.items():
-            grade, state = sentimentsManager.assignGradeToReview(rawReviewData["readable"])
+            if preprocessor.GetReviewFromCache(rawReview) is not None and "LLM-score" in preprocessor.GetReviewFromCache(rawReview):
+                # Use the cached data
+                grade = preprocessor.GetReviewFromCache(rawReview)["LLM-score"] 
+                state = "C"
+            else:
+                grade, state = sentimentsManager.assignGradeToReview(rawReviewData["readable"])
+                preprocessor.AddSubitemsToReviewCache(rawReview, {"LLM-score": grade})
             print(f"{state}", end="")
             index += 1
             if (index and (index % 100) == 0):
                 print(f" {index} of {len(filtered_reviews_dict)}")
             # If the state is "E", skip the review and continue to the next one.
             if state == "E":
-                continue
-            # Update the review dictionary with the LLM score
+                grade = 0
             rawReviewData["LLM-score"] = grade
         print("\nDone.")
 
