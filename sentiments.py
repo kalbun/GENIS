@@ -35,9 +35,13 @@ class Sentiments:
 
         if not os.path.exists(cachePath):
             os.makedirs(cachePath, exist_ok=True)
-        self.sentimentCache_Load()
+        self.cacheLoad()
+    
+    def __del__(self):
+        # Save cache when the instance is being destroyed
+        self.cacheSave()
 
-    def sentimentCache_Load(self) -> dict:
+    def cacheLoad(self) -> dict:
         """
         Load the sentiment cache from the file if it exists and bypass is not set.
         
@@ -51,7 +55,7 @@ class Sentiments:
                 pass
         return self.sentimentCache
 
-    def sentimentCache_Save(self):
+    def cacheSave(self):
         """
         Save the sentiment cache to the file if bypass is not set.
         """
@@ -64,7 +68,7 @@ class Sentiments:
                     pass
                 self.sentimentCacheSemaphore.release()
 
-    def sentimentCache_CreateItem(self, item: str, topic_sentiments: dict):
+    def createItem(self, item: str, topic_sentiments: dict):
         """
         Create a new item in the sentiment cache with the given topic sentiments.
         
@@ -78,7 +82,7 @@ class Sentiments:
                 self.sentimentCache[item]['sentiments'] = topic_sentiments
             self.sentimentCacheSemaphore.release()
 
-    def sentimentCache_updateSentiment(self, item: str, topic_sentiments: dict):
+    def updateSentiment(self, item: str, topic_sentiments: dict):
         """
         Update the sentiment for the given item in the cache.
         
@@ -90,7 +94,18 @@ class Sentiments:
             self.sentimentCache[item] = {'sentiments': topic_sentiments}
             self.sentimentCacheSemaphore.release()
 
-    def sentimentCache_updateOriginalRating(self, item: str, originalRating: float, newRating: float):
+    def updateLLMscore(self, item: str, score: float):
+        """
+        Update the LLM score for the given item in the cache.
+        
+        :param item: the item to update in the cache
+        :param score: the LLM score to set in the cache
+        """
+        if self.sentimentCacheSemaphore.acquire():
+            self.sentimentCache[item]['LLMscore'] = score
+            self.sentimentCacheSemaphore.release()
+
+    def updateOriginalRating(self, item: str, originalRating: float, newRating: float):
         """
         Update the original rating in the sentiment cache for the given item.
         
@@ -318,28 +333,40 @@ class Sentiments:
             associatedSentiments.append(generalTopic)
         return associatedSentiments
 
-    def assignGradeToReview(self, review: str) -> int:
+    def assignGradeToReview(self, review: str) -> tuple[float, str]:
         """
         Assign a grade from 1 to 10 to the review, using a zero-shot
         LLM questioning. The grade is based only on the review text,
         because the LLM does not know the rating.
+        If the operation succeeds, the grade is cached in the sentimentCache.
         
         :param review: the review text
-        :param rating: the rating of the review
+        :return: the assigned grade (1-10) and the return state
+        The return state can be:
+            - "C": cached data
+            - "_": data parsed from the LLM
+            - "E": exception occurred
         """
-        score: int = 0
+        score: float = 0
         retry_counter: int = 0
+        tag: str = "_"
         model: str = "mistral-small-latest"
         prompt: str = textwrap.dedent(f"""
-                Read this Amazon review and rate experience
-                from 1 to 10, where 1 worst experience, 10 best.
+                Read this ecommerce review and rate it from 1 to 10.
+                Put yourself in customer clothes.
+                1 = worst review, 10 = best.
                 You can use half scores like 6.5.
-                Be moderate with scores.
                 RETURN ONLY SCORE. NO COMMENTS OR ANYTHING ELSE!!!
                 ---
-                Review to score:
+                Review:
                 {review}""")
 
+        if (not self.sentimentCacheBypass) and review in self.sentimentCache:
+            # if review is cached, retrieve the score from the cache
+            cached_data = self.sentimentCache[review]
+            if 'LLMscore' in cached_data:
+                # if score is cached, return it
+                return cached_data['LLMscore'], 'C'
         while (retry_counter < 3):
             try:
                 if self.llmSemaphore.acquire():
@@ -359,16 +386,17 @@ class Sentiments:
                         raise e
                     self.llmSemaphore.release()
                     score = float(response.choices[0].message.content.strip())
+                    self.updateLLMscore(review, score)
                     break
             except SDKError:
                 retry_counter += 1
                 continue
             except Exception:
                 # exit
-                print("E", end="", flush=True)
+                tag = "E"
                 break  # empty output
 
-        return score
+        return score, tag
 
     def parseScore(self, text: str, topics: list[str]) -> tuple[dict, str]:
         """
@@ -465,8 +493,8 @@ class Sentiments:
                         if match:
                             output = json.loads(match.group(0))
                             # update the sentiment cache with the parsed output
-                            self.sentimentCache_updateSentiment(text, output)
-                            self.sentimentCache_Save()
+                            self.updateSentiment(text, output)
+                            self.cacheSave()
                             returnState = "_"
                     except json.JSONDecodeError:
                         returnState = "J"
@@ -481,7 +509,7 @@ class Sentiments:
 
         return output, returnState
 
-    def sentimentCache_getSentimentAndAdjustedRating(self, text: str, original_rating: float, topics: list[str], forceRandom: bool = False) -> tuple[dict, float]:
+    def getSentimentAndAdjustedRating(self, text: str, original_rating: float, topics: list[str], forceRandom: bool = False) -> tuple[dict, float]:
         """
         Retrieve sentiment data and calculate the adjusted rating based on available topics.
         
@@ -512,23 +540,23 @@ class Sentiments:
                 else:
                     # if adjusted rating is not cached, calculate it based on the sentiments
                     adjusted_rating = self.adjustRating(original_rating, topic_sentiments)
-                    self.sentimentCache_updateOriginalRating(text, original_rating, adjusted_rating)
-                    self.sentimentCache_Save()
+                    self.updateOriginalRating(text, original_rating, adjusted_rating)
+                    self.cacheSave()
                     print(".", end="", flush=True)
             else:
                 # if sentiments are not cached and there are topics, calculate them
                 if len(topics) > 0:
                     topic_sentiments = self.parseScore(text, topics)
-                    self.sentimentCache_updateSentiment(text, topic_sentiments)
-                    topic_sentiments, adjusted_rating = self.sentimentCache_getSentimentAndAdjustedRating(text, original_rating, topics)
+                    self.updateSentiment(text, topic_sentiments)
+                    topic_sentiments, adjusted_rating = self.getSentimentAndAdjustedRating(text, original_rating, topics)
                 else:
                     # Sentiment empty and no topics for sentiment analysis.
-                    self.sentimentCache_updateOriginalRating(text, original_rating, original_rating)
-                    self.sentimentCache_Save()
+                    self.updateOriginalRating(text, original_rating, original_rating)
+                    self.cacheSave()
                     print("_", end="", flush=True)
         else:
             # if text not in cache, create a new entry and recurse
-            self.sentimentCache_CreateItem(text, {})
-            topic_sentiments, adjusted_rating = self.sentimentCache_getSentimentAndAdjustedRating(text, original_rating, topics)
+            self.createItem(text, {})
+            topic_sentiments, adjusted_rating = self.getSentimentAndAdjustedRating(text, original_rating, topics)
 
         return topic_sentiments, adjusted_rating
