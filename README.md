@@ -1,61 +1,44 @@
-Valid up to version 0.5.0
+Valid up to version 0.10.0
 
 # CHANGELOG
 
-0.5.0: added the ability to generate random corrected scores
-0.4.0: added new run parameters
+0.10.0: Switched from notebook to regular python file. Refactoring of many parts. No more sentiment cache, everything is now in the preprocessing cache. Involvement of LLM to give a score to the review.
 
 # OVERALL IDEA
 
-gaussianiser was written to verify if the text associated to Amazon reviews
-allow to build a numeric score more realistic and informative than the star
-number.
-Due to commercial and psychological pressure, the maximum score of five stars
-does not associate with exceptional purchasing experience, but rather to lack
-of negative issues (a common behaviour is to remove one star per issue).
-Yet, this flattens most of the scores to five stars, making not distinguishable
-very different reviews like "best purchase of my life" and "it was ok".
+GENIS was written to verify if the text associated to Amazon reviews allow to build a numeric score more realistic and informative than the star number. Due to commercial and psychological pressure, the maximum score of five stars does not associate with exceptional purchasing experience, but rather to lack of negative issues (a common behaviour is to remove one star per issue). Yet, this flattens most of the scores to five stars, making not distinguishable very different reviews like "best purchase of my life" and "it was ok".
 
-The research hypothesis is that the score distribution should be, in fact,
-normal. (WHY?????)
+GENIS attempts to reconstruct the numeric score by considering the review text in addition to initial score. GENIS uses a combination of traditional NLP and LLM to calculate a score from 1 to 10.
 
-gaussianiser attempts to recalculate the numeric score by considering the
-review text in addition to initial score. To do so, gaussianiser:
+GENIS uses NLP techniques to extract sentiment-loaded pairs of nouns and adjectives (like "good music" or "yellow duck"). These context-unaware data are prefiltered by using VADER algorithm. The above-threshold nouns are then passed to a LLM along with the review, which attributes a sentiment (-1, 0 or +1) to each noun. By summing up separately the negative, neutral and positive sentiments, we obtain the three final scores of GENIS. To convert them into a number from 1 to 10, we trained a random forest regressor that gets in input the three GENIS scores and the original rating in stars.
 
-- preprocess reviews with nltk tokenizer, keeping only nouns and adjectives
-- use embeddings to preserve only words semantically near enough to the
-  review overall topic
-- clusterises selected words with hdbscan
-- stores words belonging to each cluster
-- assigns each review to one and only one cluster
-- invoke an llm passing the review and cluster words, asking to evaluate
-  the sentiment for each of them. The prompt instructs the llm to assign
-  a numerical score from -1 to +1 with a resolution of 0.5.
-  For example, if cluster contains _reader_, _reading_ and _readership_
-  while the review is _I read this book with great pleasure_, then the
-  llm may return a score of 0.5 or 1.
-- calculates a correction score as the sum of all the words found (0 if
-  no words were found).
-- calculates the final corrected score as the original score plus the
-  correction multiplied by a factor:
+Preliminary tests suggest that GENIS performs better than the LLM and VADER separately when comparing calculated scores with human-made grades.
+Moreover, the nouns extracted from the review account for a better explainability of the score: the GENIS methodology not only grades the reviews, but can also explain which specific aspects contributed.
 
-    S_o = original score
-    C = correction
-    a = scale factor
-    S_c = corrected score
+GENIS performs these steps on a review:
+- cleanup, unescaping and other regularisation operations.
+- extraction of noun-adjective pairs from the review, using Spacy NLP. We consider both adjectival modifiers (e.g., "good" in "good music") and adjectival complements (e.g., "good" in "the product is good"). In this version, we don't consider other sentiment-loaded pairs like verb-noun ("I love this music"). This could be considered in next works.
+- Pairs filtering with VADER, keeping only those with absolute compound value at least 0.05. Note that the selection is context-independent.
+- Sentiment calculation with LLM, which receives the review and the nouns from the filtered pairs (not the adjectives). The LLM is asked to give a value of -1 (negative), 0 (neutral) or +1 (positive) to each noun. The query uses zero-shot with a few examples embedded.
+- Separate count of positive, neutral and negative aspects, which represent the GENIS scores.
+- training or inference of a random forest classifier.
 
-    S_c = S_o + C * a
-    
-# RUN GAUSSIANISER
+# GENISCALC vs GENISTRAIN
+
+GENIS software is made of two distinct modules:
+
+- genisCalc.py, used to preprocess reviews and generate data for human grading of reviews and training of the ML model
+- genisTrain.py that get data obtained from genisCalc and use them to train a classifier.
+
+# RUN GENIS
 
 ## Create the environment
 
-To run gaussianiser, create a new python environment and install there the
-python interpreter version 3.12.
+To run GENIS scripts, it is recommended to create a new python environment and install there the python interpreter version 3.12.
 For example, with miniconda, execute:
 
-    conda create -n myenv
-    conda activate myenv
+    conda create -n GENIS
+    conda activate GENIS
     conda install python=3.12
 
 Once python is installed, invoke pip to install the requirements:
@@ -64,25 +47,32 @@ Once python is installed, invoke pip to install the requirements:
 
 The operation may take several minutes, but it should run with no problems.
 
-## Create key file
+Conda recommends to first try to install from their distribution channel (conda install) and use pip only for packets not found.
 
-gaussianiser needs access to Mistral APIs. To do so, you must create a text
-file name key.py and write your API key in this format:
+## run genisCalc
+
+### Create key file
+
+genisCalc needs access to Mistral APIs. To do so, you must create a text file name key.py and write your API key in this format:
 
     MistraAIKey: str = <your key>
 
-You can use different LLMs, but in this case you will need to manually modify
-the code in sentiments.py.
+*Please note*: to shorten LLM interaction, we run queries in parallel. The number of queries varies with the Mistral license you have: for paid licenses, at current date (May 2025) you have a limit of six and of two million tokens per minute.
+You can change the number of concurrent queries by modifying the semaphore init in sentiments.py:
 
-## Run parameters
+    self.llmSemaphore = threading.Semaphore(6) <-- change it as needed
 
-Gaussianiser has several parameters that influence how it works.
+You can use different LLMs, but you will need to manually modify the code in sentiments.py.
+
+### command line parameters
+
+genisCalc has several parameters that influence how it works.
 To get acquainted with them, you can add the -h or --help switch and
 read the resulting message.
 
 filename
   the only mandatory parameter, defines a Jsonl file containing the
-  reviews to analyse.
+  reviews to analyse. The extension is optional: rubberducks and rubberducks.jsonl have the same effect.
   
 -s SEED
   Allows to set the seed for the random generator. The default is 1967.
@@ -91,109 +81,94 @@ filename
 -m MAX_REVIEWS
   Limits the number of analysed reviews. Default is 1000.
 
--r RUNS
-  Allows to repeat the analysis multiple times. At each run gaussianiser
-  selects a different subset of reviews and repeat the clustering and
-  sentiment analysis. Data from all runs are collected into a single file,
-  see later "output files".
-  Default is one run.
+### An example
 
--n --no_images
-  By default, gaussianiser shows the results of score reranking in a chart.
-  You can prevent the chart generation with this flag. It could be useful
-  in case you only need the result files, or when you set RUNS to a high
-  values and want to make the process automatic.
+You got a file of great reviews called redapples.jsonl. Then you call:
 
--hc --hcluster
-  Allows to modify the minimum cluster size used in HDBSCAN. Default 3.
+    python.exe redapples
 
--hs --hsize
-  Allows to modify the minimum sample used in HDBSCAN. Default 2.
+This will process 1000 reviews with random seed 1967, producing various files described in "genisCalc files".
 
--t --threshold
-  Allows to modify the relevance threshold for embeddings. A word is
-  classified as relevant if the semantic similarity is at least this value.
-  Default 0.25.
-
--b --bypass
-  Bypasses embeddings and sentiment caches. This is useful to run analysis
-  that changes the relevance threshold or HDBSCAN parameters.
-
--e --earlystop
-  Stop after printing cluster table. Do not execute LLM sentiment analysis.
-
--fr --forcerandom
-  If this flag is specified, sentiment scores for each topic are not
-  calculated with LLM but randomly selected. This is useful for statistical
-  purposes when attempting to demonstrate null hypothesis.
-
-## Where to find reviews?
-
-  There are many public repositories with Amazon review, but one of the best
-  can be found here:
-  
-  https://amazon-reviews-2023.github.io/
-
-  This site hosts an impressive collection of reviews for various categories.
-  To use them, just pick a category, click the <review> link, gunzip the
-  downloaded file and put it in gaussianiser directory.
-  Be careful, many files are really huge!
-
-  You can also use different sources, provided the file is in jsonl format
-  and contain, as a minimum, the review text and the score in stars (1-5).
-
-## First run and automatic downloads
+### First run and automatic downloads
 
 nltk and sentence_transformer libraries need additional packets to work.
 During the first run, they will connect to the internet and automatically
 download additional files. The operation is long but it takes place once.
 
-# DATA STORAGE
+### genisCalc output files
 
-Gaussianiser saves a number of files while running and put them in different
-directories to help keeping data in order.
-Moreover, it also caches data to reduce recalculation to a minimum in case of multiple runs.
+genisCalc stores all the files into subdirs of a directory called data.
 
-## Cache files
+If the topic file is called **topic**.jsonl and the random seed is **seed**, then genisCalc creates:
 
-If the topic file is called **topic**.jsonl, then Gaussianiser creates these cache files under subdirectory **topic**:
+    data/**topic**
+    data/**topic**/**seed**
 
-- **topic**_embeddings_cache.pkl  
-  A dictionary that associates a word with its embeddings. Stored in pickle format.
+File created or updated are:
 
-- **topic**_spellcheck_cache.json  
-  A dictionary associating each original sentence with its spellchecked version. Caching the spellcheck result reduces the processing time for this intensive operation.
-
-- **topic**_correction_cache.json  
+- data/**topic**/correction_cache.json  
   A dictionary that associates each word with its corrected form. The file contains only words that were corrected. This cache minimizes the repeated work of spell checking.
 
-- **topic**_preprocessing_cache.json  
-  A dictionary where each corrected sentence is associated with tokens extracted during preprocessing (tokenized nouns) and the original score.
+- data/**topic**/preprocessing_cache.json
+  A dictionary storing all the aspects related to a review, like associated pairs, VADER and LLM score, cleaned text. Don't change this file unless you know very well what you are doing.
 
-- **topic**_sentiment_cache.jsonl  
-  A dictionary where each corrected sentence is associated with the terms to use for sentiment analysis and the resulting score.
+- data/**topic**/**seed**/selected_reviews.csv
+  This file contains the reviews to manually grade. The human reviewer should read the texts in column 1 and replace the scores in column 2.
+  Note that <b>this file is replaced at every run</b>! This could be quite unpleasant if you already annotated manual grades. To avoid unintended overwrites, genisCalc asks for a confirmation before proceeding.
 
-- **topic**_results.csv  
-  Contains the original and reranked scores along with additional details.
+## You want to stay in the loop? Then it's your turn!
 
-Gaussianiser also creates a sub-subdirectory named after the seed value and stores there the cache of LLM-based sentiment analysis, for example:
+After genisCalc has successfully completed the run, and before you invoke genisTrain, you need to manually grade a selection of 100 reviews. The file is in CSV format and its directory depends on the name of your jsonl review file and the seed. For example, if you launched:
 
-  **magazines**_sentiments_cache.jsonl
+    python.exe genisCalc.py shamansticks.json -s 4321
 
-We recommend not to modify these files.
+then the file will be located in:
 
-## The results csv file
+    data/shamansticks/4321/selected_reviews.csv
 
-This file contains the original and reranked scores, along with other details.
-The first row contains the data header and should be rather self-explanantory.
+Open the file with an appropriate application (Excel for example, or a notepad of your choice). You will see three columns: the first is the review in readable form, the second contains the scores, the third is the original review.
 
-  timestamp,run,original,adjusted,seed,reviewID,sentence,appVersion
+Please attribute a grade to each review. Put yourself in customer's clothes, try to summarize the text in a single number. Not easy but we humans are good at this!
+Please also resist the temptation to use an LLM because this may taint the results of the training.
 
-reviewID refers to the position of the review in the file. The first review is
-ID 0, the second has ID 1, and so on.
+## run genisTrain
 
-run is the run number, starting from 1. For example, if you set -r 10 when
-invoking gaussianiser, you will find that the field <run> moves from 1 to 10.
-Yet, by calling gaussianiser ten times, you will get all the data with <run>
-set to 1. Also, considering that the seed is predetermined, all the ten runs
-will exhibit exactly the same parameters.
+Once the manual grading is completed, you can invoke genisTrain. This will:
+- train the random forest classifier
+- save the classifier in a simple pickle file for later usage
+- get preliminary metrics.
+
+genisTrain receives two parameters:
+
+List of space-separated directories:
+  names of directories where genisCalc stored its data. For example, if you processed rubberducks.jsonl and lightsabers.json, then invoke genisTrain this way:
+
+    python.exe genisTrain.py rubberducks lightsabers
+
+  You can specify as many directories as you want.
+
+-s SEED:
+  Allows to set the seed for the random generator. The default is 1967.
+  Specify the same seed used for genisCalc.
+
+### genisTrain output files
+
+genisTrain will produce two files:
+
+    data/overall_results containing the consolidated data in csv (see DATA STORAGE)
+    data/random_forest_classifier.pkl, the serialized dump of the classifier in pickle format.
+
+# Where to find reviews?
+
+  There are many public repositories with Amazon review, but one of the best can be found here:
+  
+  https://amazon-reviews-2023.github.io/
+
+  This site hosts an impressive collection of reviews for various categories. To use them, just pick a category, click the <review> link, gunzip the downloaded file and put it in GENIS directory. The .jsonl provided are already in the right format.
+  Be careful, many files are really huge!
+
+  You can also use different sources, provided the file is in jsonl format and contain, as a minimum, the review text and the score in stars (1-5) in two columns named respectively "text" and "rating". Should you column have a different name, you need to change the code in genisCalc.py
+
+    label_text: str = "text"
+    label_rating: str = "rating"  <-- change labels as needed
+
