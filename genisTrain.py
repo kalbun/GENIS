@@ -13,8 +13,9 @@ import pickle
 from sklearn.model_selection import train_test_split
 from scipy.stats import pearsonr
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import mean_squared_error, r2_score, f1_score
+from sklearn.metrics import f1_score, confusion_matrix
 from preprocessing import ReviewPreprocessor
+import matplotlib.pyplot as plt
 
 ver: str = "0.10.0"
 # Labels for the text and rating in the jsonl file
@@ -26,10 +27,15 @@ label_rating: str = "rating"
 # Initialization postponed as it requires the cache path, calculated later.
 preprocessor: ReviewPreprocessor = None
 
+# Dictionary to store the data acquired from the csv files and the caches
+DataDict: dict = {}
 # Lists to store the data acquired from the csv files and the caches
 Reviews: list[str] = []
-X: list[list[float,float,float,float]] = []
+X_train: list[list[float]] = []
+X_test: list[list[float]] = []
 Y: list[float] = []
+Y_train: list[float] = []
+Y_test: list[float] = []
 V_scores: list[float] = []
 LLM_scores: list[float] = []
 
@@ -97,28 +103,39 @@ for path in args.paths:
                 O_score = cached_data.get("score", 0)
                 parsed_scores = cached_data.get("parsed_scores", {})
                 # Extract the scores from the parsed scores dictionary
-                L_scoreP = sum([score for score in parsed_scores.values() if score > 0])
-                L_scoreM = sum([score for score in parsed_scores.values() if score < 0])
-                L_scoreN = sum([score for score in parsed_scores.values() if score == 0])
-                # Update the review dictionary with the LLM score
-                V_score = cached_data.get("V-Whole", 0)
-                LLM_score = cached_data.get("LLM-score", 0)
-                # Append features to X and target to Y
-                # Note that LLM score is not used in the model, but it is included for
-                # later statistical analysis.
-                X.append([O_score, L_scoreP, L_scoreM, L_scoreN])
-                # Convert human score to string to force the regressor to
-                # work to a classification problem instead of a regression one.
-                Y.append(str(hscore))
-                Reviews.append(cached_data.get("readable", ""))
-                V_scores.append(V_score)
-                LLM_scores.append(LLM_score)
+                DataDict[review] = {
+                    "O-score": O_score,
+                    "L-scoreP": sum([score for score in parsed_scores.values() if score > 0]),
+                    "L-scoreM": sum([score for score in parsed_scores.values() if score < 0]),
+                    "L-scoreN": sum([score for score in parsed_scores.values() if score == 0]),
+                    "hscore": str(hscore),
+                    "V-Whole": cached_data.get("V-Whole", 0),
+                    "LLM-score": cached_data.get("LLM-score", 0),
+                    "readable": cached_data.get("readable", "")
+                }
                 counter += 1
 
     print(f"Loaded {counter} reviews from {filePath}")
 
 # Split the data into training and testing sets (80% train, 20% test)
-X_train, X_test, Y_train, Y_test, Rev_train, Rev_test, V_train, V_test, LLM_train, LLM_test = train_test_split(X, Y, Reviews, V_scores, LLM_scores, test_size=0.20, random_state=args.seed)
+DataDict_train, DataDict_test = train_test_split(list(DataDict.values()), test_size=0.20, random_state=args.seed)
+
+Y = [data["hscore"] for data in DataDict.values()]
+X_train = [
+    [data["O-score"], data["L-scoreP"], data["L-scoreM"], data["L-scoreN"]]
+    for data in DataDict_train
+    ]
+X_test = [
+    [data["O-score"], data["L-scoreP"], data["L-scoreM"], data["L-scoreN"]]
+    for data in DataDict_test
+    ]
+Y_train = [data["hscore"] for data in DataDict_train]
+Y_test = [data["hscore"] for data in DataDict_test]
+V_scores = [data["V-Whole"] for data in DataDict.values()]
+V_scores = [(int( ((v + 1) * 3.5 + 1) * 2) / 2) for v in V_scores]  # Adjust VADER scores
+V_labels = [str(v) for v in V_scores]
+LLM_scores = [data["LLM-score"] for data in DataDict.values()]
+LLM_labels = [ str(l) for l in LLM_scores]  # Adjust LLM scores to match the labels
 
 model = RandomForestClassifier(n_estimators=16, min_samples_split=5, random_state=args.seed)
 print(f"Training model with {len(X_train)} samples")
@@ -128,8 +145,6 @@ print(f"Predicting {len(X_test)} samples")
 Y_pred = model.predict(X_test)
 
 # Evaluate the model
-mse = mean_squared_error(Y_test, Y_pred)
-r2 = r2_score(Y_test, Y_pred)
 print("Evaluation metrics, F1 with human baseline:")
 print("Params\tweight\tmicro\tmacro\tPearson")
 print(f"Train\t{f1_score(Y_train, model.predict(X_train), average='weighted'):.2f}",end="")
@@ -140,16 +155,67 @@ print(f"Test\t{f1_score(Y_test, Y_pred, average='weighted'):.2f}",end="")
 print(f"\t{f1_score(Y_test, Y_pred, average='micro'):.2f}",end="")  
 print(f"\t{f1_score(Y_test, Y_pred, average='macro'):.2f}",end="")
 print(f"\t{pearsonr([float(y) for y in Y_test], [float(y) for y in Y_pred])[0]:.2f}")
-V_labels = [ str(int(( (v + 1) * 3.5 + 1) * 2) / 2) for v in V_scores]  # Adjust VADER scores to match the labels
 print(f"VADER\t{f1_score(Y, V_labels, average='weighted'):.2f}",end="")
 print(f"\t{f1_score(Y, V_labels, average='micro'):.2f}",end="")
 print(f"\t{f1_score(Y, V_labels, average='macro'):.2f}",end="")
-print(f"\t{pearsonr([float(y) for y in Y], [float(y) for y in V_scores])[0]:.2f}")
-LLM_labels = [ str(l) for l in LLM_scores]  # Adjust LLM scores to match the labels
+print(f"\t{pearsonr([float(y) for y in Y], [float(y) for y in V_scores])[0]:.2f}\t(whole sample)")
 print(f"LLM\t{f1_score(Y,LLM_labels, average='weighted'):.2f}",end="")
 print(f"\t{f1_score(Y, LLM_labels, average='micro'):.2f}",end="")
 print(f"\t{f1_score(Y, LLM_labels, average='macro'):.2f}",end="")
-print(f"\t{pearsonr([float(y) for y in Y], [float(y) for y in LLM_scores])[0]:.2f}")
+print(f"\t{pearsonr([float(y) for y in Y], [float(y) for y in LLM_scores])[0]:.2f}\t(whole sample)")
+
+# Show the confusion matrices
+plt.figure(figsize=(10, 7))
+plt.subplot(1, 2, 1)
+# Calculate ordered labels from numeric values. This quite complex operation is
+# needed to show the labels in numerical order.
+# Only get the labels from the test set
+LLM_labelsT = [str(l) for l in [data["LLM-score"] for data in DataDict_test]]
+ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y_test + LLM_labelsT))])]
+# First confusion matrix (LLM vs Y_test)
+confusion_matrix_result = confusion_matrix(
+    y_true=Y_test,
+    y_pred=LLM_labelsT,
+    labels=ordered_labels
+)
+plt.imshow(confusion_matrix_result, interpolation='nearest', cmap=plt.cm.Blues)
+plt.title("Confusion matrix for LLM")
+plt.colorbar()
+tick_marks = range(len(ordered_labels))
+plt.xticks(tick_marks, ordered_labels, rotation=45)
+plt.yticks(tick_marks, ordered_labels)
+plt.xlabel("LLM")
+plt.ylabel("Human")
+# Annotate the cells with the confusion matrix values
+for i in range(confusion_matrix_result.shape[0]):
+    for j in range(confusion_matrix_result.shape[1]):
+        plt.text(j, i, format(confusion_matrix_result[i, j], 'd'),
+                 ha="center", va="center", color="black")
+
+plt.subplot(1, 2, 2)
+# Second confusion matrix (Y_pred vs Y_test)
+ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y_test + Y_test))])]
+confusion_matrix_result = confusion_matrix(
+    y_true=Y_test,
+    y_pred=Y_pred,
+    labels=ordered_labels
+)
+plt.imshow(confusion_matrix_result, interpolation='nearest', cmap=plt.cm.Blues)
+plt.title("Confusion matrix for GENIS")
+plt.colorbar()
+tick_marks = range(len(ordered_labels))
+plt.xticks(tick_marks, ordered_labels, rotation=45)
+plt.yticks(tick_marks, ordered_labels)
+plt.xlabel("GENIS")
+plt.ylabel("Human")
+# Annotate the cells with the confusion matrix values
+for i in range(confusion_matrix_result.shape[0]):
+    for j in range(confusion_matrix_result.shape[1]):
+        plt.text(j, i, format(confusion_matrix_result[i, j], 'd'),
+                 ha="center", va="center", color="black")
+
+plt.tight_layout()
+plt.show()
 
 # Write the contents of all files into a new CSV file
 with open('data/overall_results.csv', 'w', encoding='utf-8', newline='') as file:
@@ -168,34 +234,35 @@ with open('data/overall_results.csv', 'w', encoding='utf-8', newline='') as file
         "LLM",  # LLM score
         "review"  # review file
     ])
-    for x, y, v, llm, review in zip(X_train, Y_train, V_train, LLM_train, Rev_train):
+    for data in DataDict_train:
         writer.writerow([
             datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # timestamp
             "tr",  # type (train/test)
-            x[0],  # O-score
-            x[1],  # L-scoreP
-            x[2],  # L-scoreM
-            x[3],  # L-scoreN
-            float(y),  # Y (human score)
-            float(y),  # Y-pred (same as Y for training data)
-            v,  # VADER score
-            llm,  # LLM score
-            review,  # review file
+            data["O-score"],  # O-score
+            data["L-scoreP"],  # L-scoreP
+            data["L-scoreM"],  # L-scoreM
+            data["L-scoreN"],  # L-scoreN
+            float(data["hscore"]),  # Y (human score)
+            float(data["hscore"]),  # Y-pred (same as Y for training data)
+            data["V-Whole"],  # VADER score
+            data["LLM-score"],  # LLM score
+            data["readable"]  # review file
         ])
-    for x, y, y_pred, v, llm, review in zip(X_test, Y_test, Y_pred, V_test, LLM_test, Rev_test):
+    for data in DataDict_test:
         writer.writerow([
             datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # timestamp
             "te",  # type (train/test)
-            x[0],  # O-score
-            x[1],  # L-scoreP
-            x[2],  # L-scoreM
-            x[3],  # L-scoreN
-            float(y),  # Y (human score)
-            float(y_pred),  # Y-pred (to be filled later)
-            v,  # VADER score
-            llm,  # LLM score
-            review,  # review file
+            data["O-score"],  # O-score
+            data["L-scoreP"],  # L-scoreP
+            data["L-scoreM"],  # L-scoreM
+            data["L-scoreN"],  # L-scoreN
+            float(data["hscore"]),  # Y (human score)
+            float(data["hscore"]),  # Y-pred (to be filled later)
+            data["V-Whole"],  # VADER score
+            data["LLM-score"],  # LLM score
+            data["readable"]  # review file
         ])
+
 file.close()
 print("Results written to data/overall_results.csv")
 
@@ -204,3 +271,4 @@ with open('data/random_forest_classifier.pkl', 'wb') as model_file:
     pickle.dump(model, model_file)
 print("Model dumped successfully in data/random_forest_classifier.pkl (pickle format).")
 print("Done.")
+
