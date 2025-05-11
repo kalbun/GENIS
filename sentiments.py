@@ -4,6 +4,7 @@ import threading
 import textwrap
 import re
 import warnings
+import time  # Ensure time is imported
 from mistralai import SDKError, Mistral
 from key import MistraAIKey as api_key
 
@@ -341,6 +342,40 @@ class Sentiments:
             associatedSentiments.append(generalTopic)
         return associatedSentiments
 
+    def invokeLLM(self, prompt: str, attempts: int = 5) -> tuple[str, bool]:
+        """
+        Invoke the LLM with the given prompt and data.
+
+        
+        :param prompt: the prompt to send to the LLM
+        :param attempts: number of attempts to make in case of failure
+        :return: the response from the LLM and a success flag
+        """
+        response: str = ""
+        success: bool = False
+        model: str = "mistral-small-latest"
+        retry_counter: int = 0
+
+        while retry_counter < attempts:
+            try:
+                with self.llmSemaphore:
+                    response = self.genAI_Client.chat.complete(
+                        model=model,
+                        temperature=0.0,
+                        messages=[{"role": "user", "content": prompt}],
+                    ).choices[0].message.content.strip()
+                success = True
+                break
+            except SDKError:
+                # This exception is raised when the LLM is busy
+                # or the API key is exhausted.
+                retry_counter += 1
+                time.sleep(0.2)  # wait for 200 ms before retrying
+            except Exception:
+                # exit immediately on any other exception
+                break
+        return response, success
+
     def assignGradeToReview(self, review: str) -> tuple[float, str]:
         """
         Assign a grade from 1 to 10 to the review, using a zero-shot
@@ -356,14 +391,12 @@ class Sentiments:
             - "E": exception occurred
         """
         score: float = 0
-        retry_counter: int = 0
         tag: str = "_"
-        model: str = "mistral-small-latest"
         prompt: str = textwrap.dedent(f"""
                 Read this ecommerce review and rate it from 1 to 10.
                 Put yourself in customer clothes.
                 1 = worst review, 10 = best.
-                You can use half scores like 6.5.
+                Can use half scores like 6.5 but not required to.
                 RETURN ONLY SCORE. NO COMMENTS OR ANYTHING ELSE!!!
                 ---
                 Review:
@@ -375,34 +408,13 @@ class Sentiments:
             if 'LLMscore' in cached_data:
                 # if score is cached, return it
                 return cached_data['LLMscore'], 'C'
-        while (retry_counter < 3):
-            try:
-                if self.llmSemaphore.acquire():
-                    try:
-                        response = self.genAI_Client.chat.complete(
-                            model=model,
-                            temperature=0.0,
-                            messages=[
-                                {
-                                    "role": "user",
-                                    "content": prompt,
-                                },
-                            ]
-                        )
-                    except SDKError as e:
-                        self.llmSemaphore.release()
-                        raise e
-                    self.llmSemaphore.release()
-                    score = float(response.choices[0].message.content.strip())
-                    self.updateLLMscore(review, score)
-                    break
-            except SDKError:
-                retry_counter += 1
-                continue
-            except Exception:
-                # exit
-                tag = "E"
-                break  # empty output
+        response, success = self.invokeLLM(prompt)
+        if success:
+            score = float(response)
+            self.updateLLMscore(review, score)
+            tag = "_"
+        else:
+            tag = "E"
 
         return score, tag
 
@@ -421,7 +433,7 @@ class Sentiments:
         """
         output: dict = {}
         retry_counter: int = 0
-        returnState: str = "N"
+        returnState: str = "E"
         prompt: str = ""
         
         #    if not any(topic.lower() in text.lower() for topic in topics):
