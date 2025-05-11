@@ -9,13 +9,14 @@ import csv
 import os
 import argparse
 import datetime
+import pickle
 from sklearn.model_selection import train_test_split
 from scipy.stats import pearsonr
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import mean_squared_error, r2_score, f1_score
 from preprocessing import ReviewPreprocessor
 
-ver: str = "0.9.0"
+ver: str = "0.10.0"
 # Labels for the text and rating in the jsonl file
 # The default values are the ones used in the Amazon reviews dataset
 label_text: str = "text"
@@ -197,4 +198,9 @@ with open('data/overall_results.csv', 'w', encoding='utf-8', newline='') as file
         ])
 file.close()
 print("Results written to data/overall_results.csv")
+
+# Save the model to a file
+with open('data/random_forest_classifier.pkl', 'wb') as model_file:
+    pickle.dump(model, model_file)
+print("Model dumped successfully in data/random_forest_classifier.pkl (pickle format).")
 print("Done.")
