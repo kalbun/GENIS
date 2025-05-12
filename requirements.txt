@@ -1,9 +1,10 @@
+contractions
+emoji
+ftfy
 matplotlib
-numpy
-hdbscan
-scipy
-scikit-learn
 mistralai
-sentence_transformers
 nltk
 pyspellchecker
+scikit-learn
+scipy
+spacy

@@ -41,6 +41,8 @@ For example, with miniconda, execute:
     conda activate GENIS
     conda install python=3.12
 
+## install dependencies
+
 Once python is installed, invoke pip to install the requirements:
 
     pip install -r requirements.txt
@@ -48,6 +50,13 @@ Once python is installed, invoke pip to install the requirements:
 The operation may take several minutes, but it should run with no problems.
 
 Conda recommends to first try to install from their distribution channel (conda install) and use pip only for packets not found.
+
+## download Spacy model
+
+The last phase is loading Spacy data. From the command line and inside the correct environment, invoke:
+
+    python -m spacy download en_core_web_sm
+
 
 ## run genisCalc
 
