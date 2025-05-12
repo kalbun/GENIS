@@ -13,7 +13,8 @@ import pickle
 from sklearn.model_selection import train_test_split
 from scipy.stats import pearsonr
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import f1_score, confusion_matrix
+import sklearn.metrics
+from sklearn.metrics import f1_score, confusion_matrix, precision_score, recall_score
 from preprocessing import ReviewPreprocessor
 import matplotlib.pyplot as plt
 
@@ -105,13 +106,16 @@ for path in args.paths:
                 # Extract the scores from the parsed scores dictionary
                 DataDict[review] = {
                     "O-score": O_score,
-                    "L-scoreP": sum([score for score in parsed_scores.values() if score > 0]),
-                    "L-scoreM": sum([score for score in parsed_scores.values() if score < 0]),
-                    "L-scoreN": sum([score for score in parsed_scores.values() if score == 0]),
+                    "G-scoreP": sum([score for score in parsed_scores.values() if score > 0]),
+                    "G-scoreM": sum([score for score in parsed_scores.values() if score < 0]),
+                    "G-scoreN": sum([score for score in parsed_scores.values() if score == 0]),
                     "hscore": str(hscore),
                     "V-Whole": cached_data.get("V-Whole", 0),
+                    # convert VADER score to a 1-10 scale with half grades
+                    "V-converted": round( ((cached_data.get("V-Whole", 0) + 1) * 4.5 + 1) * 2, 0) / 2,
                     "LLM-score": cached_data.get("LLM-score", 0),
-                    "readable": cached_data.get("readable", "")
+                    "readable": cached_data.get("readable", ""),
+                    "filename": path
                 }
                 counter += 1
 
@@ -122,17 +126,16 @@ DataDict_train, DataDict_test = train_test_split(list(DataDict.values()), test_s
 
 Y = [data["hscore"] for data in DataDict.values()]
 X_train = [
-    [data["O-score"], data["L-scoreP"], data["L-scoreM"], data["L-scoreN"]]
+    [data["O-score"], data["G-scoreP"], data["G-scoreM"], data["G-scoreN"]]
     for data in DataDict_train
     ]
 X_test = [
-    [data["O-score"], data["L-scoreP"], data["L-scoreM"], data["L-scoreN"]]
+    [data["O-score"], data["G-scoreP"], data["G-scoreM"], data["G-scoreN"]]
     for data in DataDict_test
     ]
 Y_train = [data["hscore"] for data in DataDict_train]
 Y_test = [data["hscore"] for data in DataDict_test]
-V_scores = [data["V-Whole"] for data in DataDict.values()]
-V_scores = [(int( ((v + 1) * 3.5 + 1) * 2) / 2) for v in V_scores]  # Adjust VADER scores
+V_scores = [data["V-converted"] for data in DataDict.values()]
 V_labels = [str(v) for v in V_scores]
 LLM_scores = [data["LLM-score"] for data in DataDict.values()]
 LLM_labels = [ str(l) for l in LLM_scores]  # Adjust LLM scores to match the labels
@@ -146,7 +149,7 @@ Y_pred = model.predict(X_test)
 
 # Evaluate the model
 print("Evaluation metrics, F1 with human baseline:")
-print("Params\tweight\tmicro\tmacro\tPearson")
+print("Params\tweight\tmicro\tmacro\tprecision\trecall\tPearson")
 print(f"Train\t{f1_score(Y_train, model.predict(X_train), average='weighted'):.2f}",end="")
 print(f"\t{f1_score(Y_train, model.predict(X_train), average='micro'):.2f}",end="")
 print(f"\t{f1_score(Y_train, model.predict(X_train), average='macro'):.2f}",end="")
@@ -166,7 +169,28 @@ print(f"\t{pearsonr([float(y) for y in Y], [float(y) for y in LLM_scores])[0]:.2
 
 # Show the confusion matrices
 plt.figure(figsize=(10, 7))
-plt.subplot(1, 2, 1)
+plt.subplot(1, 3, 1)
+# Second confusion matrix (Y_pred vs Y_test)
+ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y_test + Y_test))])]
+confusion_matrix_result = confusion_matrix(
+    y_true=Y_test,
+    y_pred=Y_pred,
+    labels=ordered_labels
+)
+plt.imshow(confusion_matrix_result, interpolation='nearest', cmap=plt.cm.Blues)
+plt.title("Confusion matrix for GENIS")
+tick_marks = range(len(ordered_labels))
+plt.xticks(tick_marks, ordered_labels, rotation=45)
+plt.yticks(tick_marks, ordered_labels)
+plt.xlabel("GENIS")
+plt.ylabel("Human")
+# Annotate the cells with the confusion matrix values
+for i in range(confusion_matrix_result.shape[0]):
+    for j in range(confusion_matrix_result.shape[1]):
+        plt.text(j, i, format(confusion_matrix_result[i, j], 'd'),
+                 ha="center", va="center", color="black")
+
+plt.subplot(1, 3, 2)
 # Calculate ordered labels from numeric values. This quite complex operation is
 # needed to show the labels in numerical order.
 # Only get the labels from the test set
@@ -180,7 +204,6 @@ confusion_matrix_result = confusion_matrix(
 )
 plt.imshow(confusion_matrix_result, interpolation='nearest', cmap=plt.cm.Blues)
 plt.title("Confusion matrix for LLM")
-plt.colorbar()
 tick_marks = range(len(ordered_labels))
 plt.xticks(tick_marks, ordered_labels, rotation=45)
 plt.yticks(tick_marks, ordered_labels)
@@ -192,21 +215,21 @@ for i in range(confusion_matrix_result.shape[0]):
         plt.text(j, i, format(confusion_matrix_result[i, j], 'd'),
                  ha="center", va="center", color="black")
 
-plt.subplot(1, 2, 2)
-# Second confusion matrix (Y_pred vs Y_test)
-ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y_test + Y_test))])]
+plt.subplot(1, 3, 3)
+# Third confusion matrix (VADER vs Y_test)
+ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y_test + V_labels))])]
 confusion_matrix_result = confusion_matrix(
-    y_true=Y_test,
-    y_pred=Y_pred,
+    y_true=Y,
+    y_pred=V_labels,
     labels=ordered_labels
 )
 plt.imshow(confusion_matrix_result, interpolation='nearest', cmap=plt.cm.Blues)
-plt.title("Confusion matrix for GENIS")
+plt.title("Confusion matrix for VADER")
 plt.colorbar()
 tick_marks = range(len(ordered_labels))
 plt.xticks(tick_marks, ordered_labels, rotation=45)
 plt.yticks(tick_marks, ordered_labels)
-plt.xlabel("GENIS")
+plt.xlabel("VADER")
 plt.ylabel("Human")
 # Annotate the cells with the confusion matrix values
 for i in range(confusion_matrix_result.shape[0]):
@@ -214,6 +237,7 @@ for i in range(confusion_matrix_result.shape[0]):
         plt.text(j, i, format(confusion_matrix_result[i, j], 'd'),
                  ha="center", va="center", color="black")
 
+plt.suptitle("Confusion matrices")  
 plt.tight_layout()
 plt.show()
 
@@ -225,42 +249,48 @@ with open('data/overall_results.csv', 'w', encoding='utf-8', newline='') as file
         "timestamp",  # timestamp
         "type",  # type (train/test)
         "O-score",  # O-score
-        "L-scoreP",  # L-scoreP
-        "L-scoreM",  # L-scoreM
-        "L-scoreN",  # L-scoreN
+        "G-scoreP",  # G-scoreP
+        "G-scoreM",  # G-scoreM
+        "G-scoreN",  # G-scoreN
         "Y",  # Y (human score)
         "Y-pred",  # Y-pred (to be filled later)
-        "VADER",  # VADER score
+        "V-converted",  # VADER converted score   
         "LLM",  # LLM score
-        "review"  # review file
+        "VADER",  # VADER score
+        "review",  # review file
+        "filename"  # filename
     ])
     for data in DataDict_train:
         writer.writerow([
             datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # timestamp
             "tr",  # type (train/test)
             data["O-score"],  # O-score
-            data["L-scoreP"],  # L-scoreP
-            data["L-scoreM"],  # L-scoreM
-            data["L-scoreN"],  # L-scoreN
+            data["G-scoreP"],  # G-scoreP
+            data["G-scoreM"],  # G-scoreM
+            data["G-scoreN"],  # G-scoreN
             float(data["hscore"]),  # Y (human score)
             float(data["hscore"]),  # Y-pred (same as Y for training data)
-            data["V-Whole"],  # VADER score
+            data["V-converted"],  # VADER converted score
             data["LLM-score"],  # LLM score
-            data["readable"]  # review file
+            data["V-Whole"],  # VADER score
+            data["readable"],  # review file
+            data["filename"]  # filename
         ])
     for data in DataDict_test:
         writer.writerow([
             datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # timestamp
             "te",  # type (train/test)
             data["O-score"],  # O-score
-            data["L-scoreP"],  # L-scoreP
-            data["L-scoreM"],  # L-scoreM
-            data["L-scoreN"],  # L-scoreN
+            data["G-scoreP"],  # G-scoreP
+            data["G-scoreM"],  # G-scoreM
+            data["G-scoreN"],  # G-scoreN
             float(data["hscore"]),  # Y (human score)
             float(data["hscore"]),  # Y-pred (to be filled later)
-            data["V-Whole"],  # VADER score
+            data["V-converted"],  # VADER converted score
             data["LLM-score"],  # LLM score
-            data["readable"]  # review file
+            data["V-Whole"],  # VADER score
+            data["readable"],  # review file
+            data["filename"]  # filename
         ])
 
 file.close()
