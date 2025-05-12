@@ -8,7 +8,6 @@ import random
 import concurrent.futures
 
 from preprocessing import ReviewPreprocessor
-from embeddings import EmbeddingsManager
 from sentiments import Sentiments
 
 # Define the analyze_sentiment function
@@ -126,7 +125,6 @@ def main():
     # Create an instance of classes used in the script.
     # Initialization postponed as it requires the cache path, calculated later.
     sentimentsManager: Sentiments = None
-    embeddingManager: EmbeddingsManager = None
     preprocessor: ReviewPreprocessor = None
 
     print(f"GENIS calc v{ver}")
