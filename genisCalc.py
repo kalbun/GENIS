@@ -363,10 +363,10 @@ data
             neutralValues = sum([score for score in parsed_scores.values() if score == 0])
             methodScore = sum(parsed_scores.values())
             # Update the review data with the LLM score
-            filtered_reviews_dict[rawReview]["L-score"] = methodScore
-            filtered_reviews_dict[rawReview]["L-scoreP"] = plusValues
-            filtered_reviews_dict[rawReview]["L-scoreM"] = minusValues
-            filtered_reviews_dict[rawReview]["L-scoreN"] = neutralValues
+            filtered_reviews_dict[rawReview]["G-score"] = methodScore
+            filtered_reviews_dict[rawReview]["G-scoreP"] = plusValues
+            filtered_reviews_dict[rawReview]["G-scoreM"] = minusValues
+            filtered_reviews_dict[rawReview]["G-scoreN"] = neutralValues
     print("")
 
     print("\nApproach 2: LLM zero-shot score for the review.")
