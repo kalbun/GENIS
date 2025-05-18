@@ -136,6 +136,27 @@ def loadCSV(filename: str) -> dict:
             }
         return dictionary
 
+def plotConfusionMatrix(y_true: list, y_pred: list, labels: list, title: str, xlabel: str, ylabel: str):
+    """Plot the confusion matrix."""
+    cm = confusion_matrix(y_true, y_pred)
+    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Grays)
+    plt.colorbar()
+    # Set the title and labels
+    plt.title(title)
+    tick_marks = range(len(labels))
+    plt.xticks(tick_marks, labels, rotation=45)
+    plt.yticks(tick_marks, labels)
+    plt.xlabel(xlabel=xlabel)
+    plt.ylabel(ylabel=ylabel)
+    # Annotate the cells with the confusion matrix values
+    max_value = cm.max()
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            color = "black" if cm[i, j] < max_value/2 else "white"
+            plt.text(j, i, format(cm[i, j], 'd'),
+                     ha="center", va="center", color=color)
+
+
 DataDict: dict = {}
 
 print(f"GENIS trainer v{ver}")
@@ -265,28 +286,27 @@ print(f"\t{f1_score(Y, LLM_labels, average='micro'):.2f}",end="")
 print(f"\t{f1_score(Y, LLM_labels, average='macro'):.2f}",end="")
 print(f"\t{pearsonr([float(y) for y in Y], [float(y) for y in LLM_scores])[0]:.2f}\t(whole sample)")
 
+print(f"\n\nModel feature importance:")
+feature_names = ["O-score", "G-scoreP", "G-scoreM", "G-scoreN"]
+print("Feature importance (Random Forest):")
+for i, feature in enumerate(feature_names):
+    print(f"{feature}: {model.feature_importances_[i]:.4f}")
+
+
 # Show the confusion matrices
 plt.figure(figsize=(10, 7))
 plt.subplot(1, 3, 1)
 # Y_pred vs Y_test
 ordered_labels = [str(v) for v in sorted(set([float(s) for s in (set(Y_test) | set(Y_pred))]))]
-confusion_matrix_result = confusion_matrix(
+plotConfusionMatrix(
     y_true=Y_test,
     y_pred=Y_pred,
-#    labels=ordered_labels
+    labels=ordered_labels,
+    title="Confusion matrix for GENIS",
+    xlabel="GENIS",
+    ylabel="Human"
 )
-plt.imshow(confusion_matrix_result, interpolation='nearest', cmap=plt.cm.Blues)
-plt.title("Confusion matrix for GENIS")
-tick_marks = range(len(ordered_labels))
-plt.xticks(tick_marks, ordered_labels, rotation=45)
-plt.yticks(tick_marks, ordered_labels)
-plt.xlabel("GENIS")
-plt.ylabel("Human")
-# Annotate the cells with the confusion matrix values
-for i in range(confusion_matrix_result.shape[0]):
-    for j in range(confusion_matrix_result.shape[1]):
-        plt.text(j, i, format(confusion_matrix_result[i, j], 'd'),
-                 ha="center", va="center", color="black")
+
 
 plt.subplot(1, 3, 2)
 # Calculate ordered labels from numeric values. This quite complex operation is
@@ -295,45 +315,26 @@ plt.subplot(1, 3, 2)
 LLM_labelsT = [str(l) for l in [data["LLM-score"] for data in DataDict_test]]
 ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y_test + LLM_labelsT))])]
 # LLM vs Y_test
-confusion_matrix_result = confusion_matrix(
+plotConfusionMatrix(
     y_true=Y_test,
     y_pred=LLM_labelsT,
-#    labels=ordered_labels
+    labels=ordered_labels,
+    title="Confusion matrix for LLM",
+    xlabel="LLM",
+    ylabel="Human"
 )
-plt.imshow(confusion_matrix_result, interpolation='nearest', cmap=plt.cm.Blues)
-plt.title("Confusion matrix for LLM")
-tick_marks = range(len(ordered_labels))
-plt.xticks(tick_marks, ordered_labels, rotation=45)
-plt.yticks(tick_marks, ordered_labels)
-plt.xlabel("LLM")
-plt.ylabel("Human")
-# Annotate the cells with the confusion matrix values
-for i in range(confusion_matrix_result.shape[0]):
-    for j in range(confusion_matrix_result.shape[1]):
-        plt.text(j, i, format(confusion_matrix_result[i, j], 'd'),
-                 ha="center", va="center", color="black")
 
 plt.subplot(1, 3, 3)
 # Third confusion matrix (VADER vs Y_test)
 ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y + V_labels))])]
-confusion_matrix_result = confusion_matrix(
+plotConfusionMatrix(
     y_true=Y,
     y_pred=V_labels,
-#    labels=ordered_labels
+    labels=ordered_labels,
+    title="Confusion matrix for VADER",
+    xlabel="VADER",
+    ylabel="Human"
 )
-plt.imshow(confusion_matrix_result, interpolation='nearest', cmap=plt.cm.Blues)
-plt.title("Confusion matrix for VADER")
-plt.colorbar()
-tick_marks = range(len(ordered_labels))
-plt.xticks(tick_marks, ordered_labels, rotation=45)
-plt.yticks(tick_marks, ordered_labels)
-plt.xlabel("VADER")
-plt.ylabel("Human")
-# Annotate the cells with the confusion matrix values
-for i in range(confusion_matrix_result.shape[0]):
-    for j in range(confusion_matrix_result.shape[1]):
-        plt.text(j, i, format(confusion_matrix_result[i, j], 'd'),
-                 ha="center", va="center", color="black")
 
 plt.suptitle("Confusion matrices")  
 plt.tight_layout()
