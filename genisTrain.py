@@ -18,7 +18,7 @@ from sklearn.metrics import f1_score, confusion_matrix, precision_score, recall_
 from preprocessing import ReviewPreprocessor
 import matplotlib.pyplot as plt
 
-ver: str = "0.10.0"
+ver: str = "0.11.0"
 # Labels for the text and rating in the jsonl file
 # The default values are the ones used in the Amazon reviews dataset
 label_text: str = "text"
@@ -59,6 +59,85 @@ For example:
 This will look for the cache in data/music and the csv in data/music/42/selected_reviews.csv.
 """
 
+def writeCSV(train_data, test_data, filename):
+    """Write the overall results CSV from training and test data dictionaries."""
+    with open(filename, 'w', encoding='utf-8', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow([
+            "timestamp", "type", "O-score", "G-scoreP", "G-scoreM", "G-scoreN", "Y", "Y-pred", "V-converted", "LLM", "VADER", "review", "filename"
+        ])
+        for data in train_data:
+            writer.writerow([
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "tr",
+                data["O-score"],
+                data["G-scoreP"],
+                data["G-scoreM"],
+                data["G-scoreN"],
+                float(data["Y"]),
+                float(data["Y"]),
+                data["V-converted"],
+                data["LLM-score"],
+                data["V-Whole"],
+                data["readable"],
+                data["filename"]
+            ])
+        for data in test_data:
+            writer.writerow([
+                datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "te",
+                data["O-score"],
+                data["G-scoreP"],
+                data["G-scoreM"],
+                data["G-scoreN"],
+                float(data["Y"]),
+                float(data["Y"]),
+                data["V-converted"],
+                data["LLM-score"],
+                data["V-Whole"],
+                data["readable"],
+                data["filename"]
+            ])
+    print(f"Results written to {filename}")
+
+def loadCSV(filename: str) -> dict:
+    """Load the overall results CSV and return lists for each column."""
+    timestamps, types, O_scores, G_scorePs, G_scoreMs, G_scoreNs = [], [], [], [], [], []
+    Ys, Y_preds, V_converted, LLMs, VADERs, reviews, filenames = [], [], [], [], [], [], []
+
+    dictionary: dict[str, dict] = {}
+
+    with open(filename, 'r', encoding='utf-8') as file:
+        fieldnames = [
+            "timestamp", "type", "O-score", "G-scoreP", "G-scoreM", "G-scoreN", "Y", "Y-pred", "V-converted", "LLM", "VADER", "review", "filename"
+        ]
+        # create a reader. The first line is the header
+        # and the rest is the data
+        reader = csv.DictReader(file, fieldnames=fieldnames)
+        reader.__next__()  # Skip the header
+        for row in reader:
+            # Append each row to the corresponding list
+            # Note that the LM model is a classifier, so we need to convert
+            # the score to a string to match the labels
+            dictionary[row["review"]] = {
+                "timestamp": row["timestamp"],
+                "type": row["type"],
+                "O-score": float(row["O-score"]),
+                "G-scoreP": float(row["G-scoreP"]),
+                "G-scoreM": float(row["G-scoreM"]),
+                "G-scoreN": float(row["G-scoreN"]),
+                "Y": str(row["Y"]),
+                "Y-pred": str(row["Y-pred"]),
+                "V-converted": str(row["V-converted"]),
+                "LLM-score": str(row["LLM"]),
+                "VADER": float(row["VADER"]),
+                "review": row["review"],
+                "filename": row["filename"]
+            }
+        return dictionary
+
+DataDict: dict = {}
+
 print(f"GENIS trainer v{ver}")
 parser = argparse.ArgumentParser(
     description=helpMessage,
@@ -67,64 +146,83 @@ parser = argparse.ArgumentParser(
 parser.add_argument(
     "paths",
     type=str,
-    nargs="+",  # Accept one or more directories
+    nargs="*",  # Accept zero or more directories
     help="List of directories under 'data/' where processed files are stored"
 )
 parser.add_argument("-s", "--seed", type=int, help="Random seed (default 1967)", default=1967)
 parser.add_argument("-v", "--version", action="version", version=f"{ver}")
+parser.add_argument('-l', '--load', type=str, default=None, help="Load data from a CSV file instead of reading the paths")
 args = parser.parse_args()
 
 # Process command line arguments
 
-for path in args.paths:
-
-    cachePath = os.path.join("data", path)
-    filePath = os.path.join(cachePath, f"{args.seed}", "selected_reviews.csv")
-    if not os.path.exists(cachePath):
-        print(f"Directory data/{path} not found.")
+if (args.load is not None):
+    # Load data from the specified CSV file
+    if not os.path.exists(args.load):
+        print(f"File {args.load} not found.")
         exit(1)
-    if not os.path.exists(filePath):
-        print(f"File {filePath} not found.")
-        exit(1)
+    # Load the CSV file into DataDict
+    DataDict = loadCSV(args.load)
+    print(f"Loaded {len(DataDict)} reviews from {args.load}")
 
-    # Instantiate the ReviewPreprocessor class (which now handles cache initialization)
-    preprocessor = ReviewPreprocessor(cachePath = cachePath)
+elif len(args.paths) != 0:
 
-    # Read the updated file with human scores
-    counter: int = 0
-    with open(filePath, mode='r', encoding='utf-8') as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            review = row['review']
-            hscore = float(row['hscore'])  # Convert human score to float
+    for path in args.paths:
 
-            # Retrieve data from the preprocessing cache
-            cached_data = preprocessor.GetReviewFromCache(review)
-            if cached_data:
-                O_score = cached_data.get("score", 0)
-                parsed_scores = cached_data.get("parsed_scores", {})
-                # Extract the scores from the parsed scores dictionary
-                DataDict[review] = {
-                    "O-score": O_score,
-                    "G-scoreP": sum([score for score in parsed_scores.values() if score > 0]),
-                    "G-scoreM": sum([score for score in parsed_scores.values() if score < 0]),
-                    "G-scoreN": sum([score for score in parsed_scores.values() if score == 0]),
-                    "hscore": str(hscore),
-                    "V-Whole": cached_data.get("V-Whole", 0),
-                    # convert VADER score to a 1-10 scale with half grades
-                    "V-converted": round( ((cached_data.get("V-Whole", 0) + 1) * 4.5 + 1) * 2, 0) / 2,
-                    "LLM-score": cached_data.get("LLM-score", 0),
-                    "readable": cached_data.get("readable", ""),
-                    "filename": path
-                }
-                counter += 1
+        cachePath = os.path.join("data", path)
+        filePath = os.path.join(cachePath, f"{args.seed}", "selected_reviews.csv")
+        if not os.path.exists(cachePath):
+            print(f"Directory data/{path} not found.")
+            exit(1)
+        if not os.path.exists(filePath):
+            print(f"File {filePath} not found.")
+            exit(1)
 
-    print(f"Loaded {counter} reviews from {filePath}")
+        # Instantiate the ReviewPreprocessor class (which now handles cache initialization)
+        preprocessor = ReviewPreprocessor(cachePath = cachePath)
+
+        # Read the updated file with human scores
+        counter: int = 0
+        with open(filePath, mode='r', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                review = row['review']
+                Y = float(row['Y'])  # Convert human score to float
+
+                # Retrieve data from the preprocessing cache
+                cached_data = preprocessor.GetReviewFromCache(review)
+                if cached_data:
+                    O_score = cached_data.get("score", 0)
+                    parsed_scores = cached_data.get("parsed_scores", {})
+                    # Extract the scores from the parsed scores dictionary
+                    DataDict[review] = {
+                        "O-score": O_score,
+                        "G-scoreP": sum([score for score in parsed_scores.values() if score > 0]),
+                        "G-scoreM": sum([score for score in parsed_scores.values() if score < 0]),
+                        "G-scoreN": sum([score for score in parsed_scores.values() if score == 0]),
+                        "Y": str(Y),
+                        "VADER": cached_data.get("V-Whole", 0),
+                        # convert VADER score to a 1-10 scale with half grades
+                        "V-converted": round( ((cached_data.get("V-Whole", 0) + 1) * 4.5 + 1) * 2, 0) / 2,
+                        "LLM-score": cached_data.get("LLM-score", 0),
+                        "readable": cached_data.get("readable", ""),
+                        "filename": path
+                    }
+                    counter += 1
+
+        print(f"Loaded {counter} reviews from {filePath}")
+
+else:
+    print("Please provide a list of directories or use the -l option to load data from a CSV file.")
+    exit(1)
+
+# At this point, DataDict contains all the data needed for training, obtained
+# either from the paths provided or from the CSV file.
 
 # Split the data into training and testing sets (80% train, 20% test)
 DataDict_train, DataDict_test = train_test_split(list(DataDict.values()), test_size=0.20, random_state=args.seed)
 
-Y = [data["hscore"] for data in DataDict.values()]
+Y = [data["Y"] for data in DataDict.values()]
 X_train = [
     [data["O-score"], data["G-scoreP"], data["G-scoreM"], data["G-scoreN"]]
     for data in DataDict_train
@@ -133,8 +231,8 @@ X_test = [
     [data["O-score"], data["G-scoreP"], data["G-scoreM"], data["G-scoreN"]]
     for data in DataDict_test
     ]
-Y_train = [data["hscore"] for data in DataDict_train]
-Y_test = [data["hscore"] for data in DataDict_test]
+Y_train = [data["Y"] for data in DataDict_train]
+Y_test = [data["Y"] for data in DataDict_test]
 V_scores = [data["V-converted"] for data in DataDict.values()]
 V_labels = [str(v) for v in V_scores]
 LLM_scores = [data["LLM-score"] for data in DataDict.values()]
@@ -148,8 +246,8 @@ print(f"Predicting {len(X_test)} samples")
 Y_pred = model.predict(X_test)
 
 # Evaluate the model
-print("Evaluation metrics, F1 with human baseline:")
-print("Params\tweight\tmicro\tmacro\tprecision\trecall\tPearson")
+print("Evaluation metrics, baseline = human grades:")
+print("Set\tF1-w\tF1-m\tF1-M\tPearson")
 print(f"Train\t{f1_score(Y_train, model.predict(X_train), average='weighted'):.2f}",end="")
 print(f"\t{f1_score(Y_train, model.predict(X_train), average='micro'):.2f}",end="")
 print(f"\t{f1_score(Y_train, model.predict(X_train), average='macro'):.2f}",end="")
@@ -170,12 +268,12 @@ print(f"\t{pearsonr([float(y) for y in Y], [float(y) for y in LLM_scores])[0]:.2
 # Show the confusion matrices
 plt.figure(figsize=(10, 7))
 plt.subplot(1, 3, 1)
-# Second confusion matrix (Y_pred vs Y_test)
-ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y_test + Y_test))])]
+# Y_pred vs Y_test
+ordered_labels = [str(v) for v in sorted(set([float(s) for s in (set(Y_test) | set(Y_pred))]))]
 confusion_matrix_result = confusion_matrix(
     y_true=Y_test,
     y_pred=Y_pred,
-    labels=ordered_labels
+#    labels=ordered_labels
 )
 plt.imshow(confusion_matrix_result, interpolation='nearest', cmap=plt.cm.Blues)
 plt.title("Confusion matrix for GENIS")
@@ -196,11 +294,11 @@ plt.subplot(1, 3, 2)
 # Only get the labels from the test set
 LLM_labelsT = [str(l) for l in [data["LLM-score"] for data in DataDict_test]]
 ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y_test + LLM_labelsT))])]
-# First confusion matrix (LLM vs Y_test)
+# LLM vs Y_test
 confusion_matrix_result = confusion_matrix(
     y_true=Y_test,
     y_pred=LLM_labelsT,
-    labels=ordered_labels
+#    labels=ordered_labels
 )
 plt.imshow(confusion_matrix_result, interpolation='nearest', cmap=plt.cm.Blues)
 plt.title("Confusion matrix for LLM")
@@ -217,11 +315,11 @@ for i in range(confusion_matrix_result.shape[0]):
 
 plt.subplot(1, 3, 3)
 # Third confusion matrix (VADER vs Y_test)
-ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y_test + V_labels))])]
+ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y + V_labels))])]
 confusion_matrix_result = confusion_matrix(
     y_true=Y,
     y_pred=V_labels,
-    labels=ordered_labels
+#    labels=ordered_labels
 )
 plt.imshow(confusion_matrix_result, interpolation='nearest', cmap=plt.cm.Blues)
 plt.title("Confusion matrix for VADER")
@@ -242,59 +340,8 @@ plt.tight_layout()
 plt.show()
 
 # Write the contents of all files into a new CSV file
-with open('data/overall_results.csv', 'w', encoding='utf-8', newline='') as file:
-    writer = csv.writer(file)
-    # Write the header
-    writer.writerow([
-        "timestamp",  # timestamp
-        "type",  # type (train/test)
-        "O-score",  # O-score
-        "G-scoreP",  # G-scoreP
-        "G-scoreM",  # G-scoreM
-        "G-scoreN",  # G-scoreN
-        "Y",  # Y (human score)
-        "Y-pred",  # Y-pred (to be filled later)
-        "V-converted",  # VADER converted score   
-        "LLM",  # LLM score
-        "VADER",  # VADER score
-        "review",  # review file
-        "filename"  # filename
-    ])
-    for data in DataDict_train:
-        writer.writerow([
-            datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # timestamp
-            "tr",  # type (train/test)
-            data["O-score"],  # O-score
-            data["G-scoreP"],  # G-scoreP
-            data["G-scoreM"],  # G-scoreM
-            data["G-scoreN"],  # G-scoreN
-            float(data["hscore"]),  # Y (human score)
-            float(data["hscore"]),  # Y-pred (same as Y for training data)
-            data["V-converted"],  # VADER converted score
-            data["LLM-score"],  # LLM score
-            data["V-Whole"],  # VADER score
-            data["readable"],  # review file
-            data["filename"]  # filename
-        ])
-    for data in DataDict_test:
-        writer.writerow([
-            datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),  # timestamp
-            "te",  # type (train/test)
-            data["O-score"],  # O-score
-            data["G-scoreP"],  # G-scoreP
-            data["G-scoreM"],  # G-scoreM
-            data["G-scoreN"],  # G-scoreN
-            float(data["hscore"]),  # Y (human score)
-            float(data["hscore"]),  # Y-pred (to be filled later)
-            data["V-converted"],  # VADER converted score
-            data["LLM-score"],  # LLM score
-            data["V-Whole"],  # VADER score
-            data["readable"],  # review file
-            data["filename"]  # filename
-        ])
-
-file.close()
-print("Results written to data/overall_results.csv")
+if (args.load is None):
+    writeCSV(DataDict_train, DataDict_test, 'data/overall_results.csv')
 
 # Save the model to a file
 with open('data/random_forest_classifier.pkl', 'wb') as model_file:
