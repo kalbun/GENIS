@@ -1,4 +1,6 @@
-Valid up to version 0.10.0
+Valid up to versions:
+genisCalc   0.10.0
+genisTrain  0.11.0
 
 # CHANGELOG
 
@@ -125,7 +127,7 @@ File created or updated are:
   This file contains the reviews to manually grade. The human reviewer should read the texts in column 1 and replace the scores in column 2.
   Note that <b>this file is replaced at every run</b>! This could be quite unpleasant if you already annotated manual grades. To avoid unintended overwrites, genisCalc asks for a confirmation before proceeding.
 
-## You want to stay in the loop? Then it's your turn!
+### You want to stay in the loop? Then it's your turn!
 
 After genisCalc has successfully completed the run, and before you invoke genisTrain, you need to manually grade a selection of 100 reviews. The file is in CSV format and its directory depends on the name of your jsonl review file and the seed. For example, if you launched:
 
@@ -147,7 +149,7 @@ Once the manual grading is completed, you can invoke genisTrain. This will:
 - save the classifier in a simple pickle file for later usage
 - get preliminary metrics.
 
-genisTrain receives two parameters:
+genisTrain receives three parameters:
 
 List of space-separated directories:
   names of directories where genisCalc stored its data. For example, if you processed rubberducks.jsonl and lightsabers.json, then invoke genisTrain this way:
@@ -159,6 +161,9 @@ List of space-separated directories:
 -s SEED:
   Allows to set the seed for the random generator. The default is 1967.
   Specify the same seed used for genisCalc.
+
+-l FILE:
+  When genisTrain is loaded with a list of paths, it consolidates all the data in one single file called overall_results.csv. With this parameter, it is possible to skip the consolidation process and directly read that file. This flag has priority over the list of paths.
 
 ### genisTrain output files
 
@@ -180,4 +185,3 @@ genisTrain will produce two files:
 
     label_text: str = "text"
     label_rating: str = "rating"  <-- change labels as needed
-
