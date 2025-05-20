@@ -11,7 +11,7 @@ import argparse
 import datetime
 import pickle
 from sklearn.model_selection import train_test_split
-from scipy.stats import pearsonr
+from scipy.stats import spearmanr
 from sklearn.ensemble import RandomForestClassifier
 import sklearn.metrics
 from sklearn.metrics import f1_score, confusion_matrix, precision_score, recall_score
@@ -78,7 +78,7 @@ def writeCSV(train_data, test_data, filename):
                 float(data["Y"]),
                 data["V-converted"],
                 data["LLM-score"],
-                data["V-Whole"],
+                data["VADER"],
                 data["readable"],
                 data["filename"]
             ])
@@ -91,10 +91,10 @@ def writeCSV(train_data, test_data, filename):
                 data["G-scoreM"],
                 data["G-scoreN"],
                 float(data["Y"]),
-                float(data["Y"]),
+                float(data["Y-pred"]),
                 data["V-converted"],
                 data["LLM-score"],
-                data["V-Whole"],
+                data["VADER"],
                 data["readable"],
                 data["filename"]
             ])
@@ -208,7 +208,7 @@ elif len(args.paths) != 0:
             reader = csv.DictReader(csvfile)
             for row in reader:
                 review = row['review']
-                Y = float(row['Y'])  # Convert human score to float
+                Y = float(row['hscore'])  # Convert human score to float
 
                 # Retrieve data from the preprocessing cache
                 cached_data = preprocessor.GetReviewFromCache(review)
@@ -222,6 +222,7 @@ elif len(args.paths) != 0:
                         "G-scoreM": sum([score for score in parsed_scores.values() if score < 0]),
                         "G-scoreN": sum([score for score in parsed_scores.values() if score == 0]),
                         "Y": str(Y),
+                        "Y-pred": str(Y),  # Placeholder for predictions
                         "VADER": cached_data.get("V-Whole", 0),
                         # convert VADER score to a 1-10 scale with half grades
                         "V-converted": round( ((cached_data.get("V-Whole", 0) + 1) * 4.5 + 1) * 2, 0) / 2,
@@ -240,53 +241,124 @@ else:
 # At this point, DataDict contains all the data needed for training, obtained
 # either from the paths provided or from the CSV file.
 
+# Filter out reviews with no scores
+#DataDict = {key: values for key, values in DataDict.items() if (values["G-scoreP"] + values["G-scoreM"] + values["G-scoreN"]) > 0}
+
 # Split the data into training and testing sets (80% train, 20% test)
-DataDict_train, DataDict_test = train_test_split(list(DataDict.values()), test_size=0.20, random_state=args.seed)
+DataDict_train, DataDict_test = train_test_split(list(DataDict.values()), test_size=0.2, random_state=args.seed)
 
 Y = [data["Y"] for data in DataDict.values()]
 X_train = [
-    [data["O-score"], data["G-scoreP"], data["G-scoreM"], data["G-scoreN"]]
+    [data["O-score"], data["G-scoreP"], data["G-scoreM"], data["G-scoreN"]
+     ]
     for data in DataDict_train
     ]
 X_test = [
-    [data["O-score"], data["G-scoreP"], data["G-scoreM"], data["G-scoreN"]]
+    [data["O-score"], data["G-scoreP"], data["G-scoreM"], data["G-scoreN"]
+     ]
     for data in DataDict_test
     ]
 Y_train = [data["Y"] for data in DataDict_train]
 Y_test = [data["Y"] for data in DataDict_test]
 V_scores = [data["V-converted"] for data in DataDict.values()]
+V_scores = [data["V-converted"] for data in DataDict_test]
 V_labels = [str(v) for v in V_scores]
 LLM_scores = [data["LLM-score"] for data in DataDict.values()]
+LLM_scores = [data["LLM-score"] for data in DataDict_test]
 LLM_labels = [ str(l) for l in LLM_scores]  # Adjust LLM scores to match the labels
 
-model = RandomForestClassifier(n_estimators=16, min_samples_split=5, random_state=args.seed)
+#model = RandomForestClassifier(n_estimators=32, min_samples_split=3, random_state=args.seed)
+model = RandomForestClassifier(
+    n_estimators=96,
+    max_depth=10,
+    max_leaf_nodes=25,
+    min_samples_leaf=2,
+    random_state=args.seed)
+#model = RandomForestClassifier(random_state=args.seed)
+"""
+from sklearn.model_selection import cross_val_score, KFold, GridSearchCV
+from sklearn.ensemble import RandomForestClassifier
+import numpy as np
+
+
+X = X_train + X_test
+y = Y_train + Y_test
+# Convert the lists to numpy arrays for compatibility with scikit-learn
+X = np.array(X)
+y = np.array(y)
+
+# Define the parameter grid for hyperparameter tuning
+param_grid = {
+    'n_estimators': [x for x in range(48, 129, 8)],
+    'criterion': ['gini'],
+    'max_depth': [None, 10, 20],
+    'min_samples_split': [x for x in range(2, 4)],
+    'max_leaf_nodes': [None, 15, 20, 25],
+    'min_samples_leaf': [1, 2],
+    'max_features': ['log2']
+}
+
+# Initialize GridSearchCV
+grid_search = GridSearchCV(estimator=model, param_grid=param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+
+# Perform grid search
+grid_search.fit(X, y)
+
+# Print the best parameters and the best score
+print("Best Parameters:", grid_search.best_params_)
+print("Best Score:", grid_search.best_score_)
+
+# Initialize k-fold cross-validation
+kfold = KFold(n_splits=5, shuffle=True, random_state=args.seed)
+
+# Perform cross-validation with the best model
+best_model = grid_search.best_estimator_
+scores = cross_val_score(best_model, X, y, cv=kfold, scoring='accuracy')
+
+# Print the cross-validation scores
+print("Cross-Validation Scores:", scores)
+
+
+exit(0)
+#"""
+
 print(f"Training model with {len(X_train)} samples")
 model.fit(X_train, Y_train)
 # Make predictions on the test set
 print(f"Predicting {len(X_test)} samples")
 Y_pred = model.predict(X_test)
+for i, y in enumerate(Y_pred):
+    DataDict_test[i]["Y-pred"] = y
 
 # Evaluate the model
 print("Evaluation metrics, baseline = human grades:")
-print("Set\tF1-w\tF1-m\tF1-M\tPearson")
+print("Set\tF1-w\tF1-m\tF1-M\tSpearman")
 print(f"Train\t{f1_score(Y_train, model.predict(X_train), average='weighted'):.2f}",end="")
 print(f"\t{f1_score(Y_train, model.predict(X_train), average='micro'):.2f}",end="")
 print(f"\t{f1_score(Y_train, model.predict(X_train), average='macro'):.2f}",end="")
-print(f"\t{pearsonr([float(y) for y in Y_train], [float(y) for y in model.predict(X_train)])[0]:.2f}")
+print(f"\t{spearmanr([float(y) for y in Y_train], [float(y) for y in model.predict(X_train)])[0]:.2f}")
 print(f"Test\t{f1_score(Y_test, Y_pred, average='weighted'):.2f}",end="")
 print(f"\t{f1_score(Y_test, Y_pred, average='micro'):.2f}",end="")  
 print(f"\t{f1_score(Y_test, Y_pred, average='macro'):.2f}",end="")
-print(f"\t{pearsonr([float(y) for y in Y_test], [float(y) for y in Y_pred])[0]:.2f}")
-print(f"VADER\t{f1_score(Y, V_labels, average='weighted'):.2f}",end="")
-print(f"\t{f1_score(Y, V_labels, average='micro'):.2f}",end="")
-print(f"\t{f1_score(Y, V_labels, average='macro'):.2f}",end="")
-print(f"\t{pearsonr([float(y) for y in Y], [float(y) for y in V_scores])[0]:.2f}\t(whole sample)")
-print(f"LLM\t{f1_score(Y,LLM_labels, average='weighted'):.2f}",end="")
-print(f"\t{f1_score(Y, LLM_labels, average='micro'):.2f}",end="")
-print(f"\t{f1_score(Y, LLM_labels, average='macro'):.2f}",end="")
-print(f"\t{pearsonr([float(y) for y in Y], [float(y) for y in LLM_scores])[0]:.2f}\t(whole sample)")
+print(f"\t{spearmanr([float(y) for y in Y_test], [float(y) for y in Y_pred])[0]:.2f}")
+print(f"VADER\t{f1_score(Y_test, V_labels, average='weighted'):.2f}",end="")
+print(f"\t{f1_score(Y_test, V_labels, average='micro'):.2f}",end="")
+print(f"\t{f1_score(Y_test, V_labels, average='macro'):.2f}",end="")
+print(f"\t{spearmanr([float(y) for y in Y_test], [float(y) for y in V_scores])[0]:.2f}\t(whole sample)")
+print(f"LLM\t{f1_score(Y_test,LLM_labels, average='weighted'):.2f}",end="")
+print(f"\t{f1_score(Y_test, LLM_labels, average='micro'):.2f}",end="")
+print(f"\t{f1_score(Y_test, LLM_labels, average='macro'):.2f}",end="")
+print(f"\t{spearmanr([float(y) for y in Y_test], [float(y) for y in LLM_scores])[0]:.2f}\t(whole sample)")
 
-print(f"\n\nModel feature importance:")
+# calculate MAE
+mae = sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in Y_pred])
+print(f"MAE for GENIS: {mae:.2f}")
+mae = sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in V_labels])
+print(f"MAE for VADER: {mae:.2f}")
+mae = sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in LLM_labels])
+print(f"MAE for LLM: {mae:.2f}")
+
+
 feature_names = ["O-score", "G-scoreP", "G-scoreM", "G-scoreN"]
 print("Feature importance (Random Forest):")
 for i, feature in enumerate(feature_names):
@@ -328,7 +400,7 @@ plt.subplot(1, 3, 3)
 # Third confusion matrix (VADER vs Y_test)
 ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y + V_labels))])]
 plotConfusionMatrix(
-    y_true=Y,
+    y_true=Y_test,
     y_pred=V_labels,
     labels=ordered_labels,
     title="Confusion matrix for VADER",
@@ -338,7 +410,7 @@ plotConfusionMatrix(
 
 plt.suptitle("Confusion matrices")  
 plt.tight_layout()
-plt.show()
+#plt.show()
 
 # Write the contents of all files into a new CSV file
 if (args.load is None):
