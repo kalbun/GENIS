@@ -140,7 +140,7 @@ def plotConfusionMatrix(y_true: list, y_pred: list, labels: list, title: str, xl
     """Plot the confusion matrix."""
     cm = confusion_matrix(y_true, y_pred)
     plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Grays)
-    plt.colorbar()
+#    plt.colorbar()
     # Set the title and labels
     plt.title(title)
     tick_marks = range(len(labels))
@@ -152,9 +152,10 @@ def plotConfusionMatrix(y_true: list, y_pred: list, labels: list, title: str, xl
     max_value = cm.max()
     for i in range(cm.shape[0]):
         for j in range(cm.shape[1]):
-            color = "black" if cm[i, j] < max_value/2 else "white"
-            plt.text(j, i, format(cm[i, j], 'd'),
-                     ha="center", va="center", color=color)
+            if cm[i, j] != 0:
+                color = "black" if cm[i, j] < max_value/2 else "white"
+                plt.text(j, i, format(cm[i, j], 'd'),
+                        ha="center", va="center", color=color)
 
 
 DataDict: dict = {}
@@ -172,6 +173,7 @@ parser.add_argument(
 )
 parser.add_argument("-s", "--seed", type=int, help="Random seed (default 1967)", default=1967)
 parser.add_argument("-v", "--version", action="version", version=f"{ver}")
+parser.add_argument("-i", "--image", action="store_true", help="Generate confusion matrix images")
 parser.add_argument('-l', '--load', type=str, default=None, help="Load data from a CSV file instead of reading the paths")
 args = parser.parse_args()
 
@@ -364,53 +366,53 @@ print("Feature importance (Random Forest):")
 for i, feature in enumerate(feature_names):
     print(f"{feature}: {model.feature_importances_[i]:.4f}")
 
+if (args.image):
+    # Show the confusion matrices
+    plt.figure(figsize=(10, 7))
+    plt.subplot(1, 3, 1)
+    # Y_pred vs Y_test
+    ordered_labels = [str(v) for v in sorted(set([float(s) for s in (set(Y_test) | set(Y_pred))]))]
+    plotConfusionMatrix(
+        y_true=Y_test,
+        y_pred=Y_pred,
+        labels=ordered_labels,
+        title="Confusion matrix for GENIS",
+        xlabel="GENIS",
+        ylabel="Human"
+    )
 
-# Show the confusion matrices
-plt.figure(figsize=(10, 7))
-plt.subplot(1, 3, 1)
-# Y_pred vs Y_test
-ordered_labels = [str(v) for v in sorted(set([float(s) for s in (set(Y_test) | set(Y_pred))]))]
-plotConfusionMatrix(
-    y_true=Y_test,
-    y_pred=Y_pred,
-    labels=ordered_labels,
-    title="Confusion matrix for GENIS",
-    xlabel="GENIS",
-    ylabel="Human"
-)
 
+    plt.subplot(1, 3, 2)
+    # Calculate ordered labels from numeric values. This quite complex operation is
+    # needed to show the labels in numerical order.
+    # Only get the labels from the test set
+    LLM_labelsT = [str(l) for l in [data["LLM-score"] for data in DataDict_test]]
+    ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y_test + LLM_labelsT))])]
+    # LLM vs Y_test
+    plotConfusionMatrix(
+        y_true=Y_test,
+        y_pred=LLM_labelsT,
+        labels=ordered_labels,
+        title="Confusion matrix for LLM",
+        xlabel="LLM",
+        ylabel="Human"
+    )
 
-plt.subplot(1, 3, 2)
-# Calculate ordered labels from numeric values. This quite complex operation is
-# needed to show the labels in numerical order.
-# Only get the labels from the test set
-LLM_labelsT = [str(l) for l in [data["LLM-score"] for data in DataDict_test]]
-ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y_test + LLM_labelsT))])]
-# LLM vs Y_test
-plotConfusionMatrix(
-    y_true=Y_test,
-    y_pred=LLM_labelsT,
-    labels=ordered_labels,
-    title="Confusion matrix for LLM",
-    xlabel="LLM",
-    ylabel="Human"
-)
+    plt.subplot(1, 3, 3)
+    # Third confusion matrix (VADER vs Y_test)
+    ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y + V_labels))])]
+    plotConfusionMatrix(
+        y_true=Y_test,
+        y_pred=V_labels,
+        labels=ordered_labels,
+        title="Confusion matrix for VADER",
+        xlabel="VADER",
+        ylabel="Human"
+    )
 
-plt.subplot(1, 3, 3)
-# Third confusion matrix (VADER vs Y_test)
-ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y + V_labels))])]
-plotConfusionMatrix(
-    y_true=Y_test,
-    y_pred=V_labels,
-    labels=ordered_labels,
-    title="Confusion matrix for VADER",
-    xlabel="VADER",
-    ylabel="Human"
-)
-
-plt.suptitle("Confusion matrices")  
-plt.tight_layout()
-#plt.show()
+    plt.suptitle("Confusion matrices")  
+    plt.tight_layout()
+    plt.show()
 
 # Write the contents of all files into a new CSV file
 if (args.load is None):
@@ -421,4 +423,3 @@ with open('data/random_forest_classifier.pkl', 'wb') as model_file:
     pickle.dump(model, model_file)
 print("Model dumped successfully in data/random_forest_classifier.pkl (pickle format).")
 print("Done.")
-
