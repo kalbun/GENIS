@@ -11,7 +11,7 @@ import argparse
 import datetime
 import pickle
 from sklearn.model_selection import train_test_split
-from scipy.stats import spearmanr
+from scipy.stats import spearmanr, pearsonr
 from sklearn.ensemble import RandomForestClassifier
 import sklearn.metrics
 from sklearn.metrics import f1_score, confusion_matrix, precision_score, recall_score
@@ -79,7 +79,7 @@ def writeCSV(train_data, test_data, filename):
                 data["V-converted"],
                 data["LLM-score"],
                 data["VADER"],
-                data["readable"],
+                data["review"],
                 data["filename"]
             ])
         for data in test_data:
@@ -95,7 +95,7 @@ def writeCSV(train_data, test_data, filename):
                 data["V-converted"],
                 data["LLM-score"],
                 data["VADER"],
-                data["readable"],
+                data["review"],
                 data["filename"]
             ])
     print(f"Results written to {filename}")
@@ -138,8 +138,9 @@ def loadCSV(filename: str) -> dict:
 
 def plotConfusionMatrix(y_true: list, y_pred: list, labels: list, title: str, xlabel: str, ylabel: str):
     """Plot the confusion matrix."""
-    cm = confusion_matrix(y_true, y_pred)
-    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Grays)
+    cm = confusion_matrix(y_true, y_pred, labels=labels)
+    plt.imshow(cm, cmap=plt.cm.Grays)
+#    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Grays)
 #    plt.colorbar()
     # Set the title and labels
     plt.title(title)
@@ -175,6 +176,7 @@ parser.add_argument("-s", "--seed", type=int, help="Random seed (default 1967)",
 parser.add_argument("-v", "--version", action="version", version=f"{ver}")
 parser.add_argument("-i", "--image", action="store_true", help="Generate confusion matrix images")
 parser.add_argument('-l', '--load', type=str, default=None, help="Load data from a CSV file instead of reading the paths")
+parser.add_argument('-f', '--force', action='store_true', help="Force overwrite of existing files")
 args = parser.parse_args()
 
 # Process command line arguments
@@ -338,19 +340,19 @@ print("Set\tF1-w\tF1-m\tF1-M\tSpearman")
 print(f"Train\t{f1_score(Y_train, model.predict(X_train), average='weighted'):.2f}",end="")
 print(f"\t{f1_score(Y_train, model.predict(X_train), average='micro'):.2f}",end="")
 print(f"\t{f1_score(Y_train, model.predict(X_train), average='macro'):.2f}",end="")
-print(f"\t{spearmanr([float(y) for y in Y_train], [float(y) for y in model.predict(X_train)])[0]:.2f}")
+print(f"\t{pearsonr([float(y) for y in Y_train], [float(y) for y in model.predict(X_train)])[0]:.2f}")
 print(f"Test\t{f1_score(Y_test, Y_pred, average='weighted'):.2f}",end="")
 print(f"\t{f1_score(Y_test, Y_pred, average='micro'):.2f}",end="")  
 print(f"\t{f1_score(Y_test, Y_pred, average='macro'):.2f}",end="")
-print(f"\t{spearmanr([float(y) for y in Y_test], [float(y) for y in Y_pred])[0]:.2f}")
+print(f"\t{pearsonr([float(y) for y in Y_test], [float(y) for y in Y_pred])[0]:.2f}")
 print(f"VADER\t{f1_score(Y_test, V_labels, average='weighted'):.2f}",end="")
 print(f"\t{f1_score(Y_test, V_labels, average='micro'):.2f}",end="")
 print(f"\t{f1_score(Y_test, V_labels, average='macro'):.2f}",end="")
-print(f"\t{spearmanr([float(y) for y in Y_test], [float(y) for y in V_scores])[0]:.2f}\t(whole sample)")
+print(f"\t{pearsonr([float(y) for y in Y_test], [float(y) for y in V_scores])[0]:.2f}\t(whole sample)")
 print(f"LLM\t{f1_score(Y_test,LLM_labels, average='weighted'):.2f}",end="")
 print(f"\t{f1_score(Y_test, LLM_labels, average='micro'):.2f}",end="")
 print(f"\t{f1_score(Y_test, LLM_labels, average='macro'):.2f}",end="")
-print(f"\t{spearmanr([float(y) for y in Y_test], [float(y) for y in LLM_scores])[0]:.2f}\t(whole sample)")
+print(f"\t{pearsonr([float(y) for y in Y_test], [float(y) for y in LLM_scores])[0]:.2f}\t(whole sample)")
 
 # calculate MAE
 mae = sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in Y_pred])
@@ -366,15 +368,22 @@ print("Feature importance (Random Forest):")
 for i, feature in enumerate(feature_names):
     print(f"{feature}: {model.feature_importances_[i]:.4f}")
 
+Y_test_fmt = [f"{float(y):.1f}" for y in Y_test]
+Y_pred_fmt = [f"{float(y):.1f}" for y in Y_pred]
+LLM_labelsT = [f"{float(data["LLM-score"]):.1f}" for data in DataDict_test]
+V_labels_fmt = [f"{float(v):.1f}" for v in V_labels]
+
 if (args.image):
     # Show the confusion matrices
+    ordered_labels = [f"{(v/2):.1f}" for v in range(2, 21)]  # Assuming the labels are from 1 to 10
+
+
     plt.figure(figsize=(10, 7))
     plt.subplot(1, 3, 1)
     # Y_pred vs Y_test
-    ordered_labels = [str(v) for v in sorted(set([float(s) for s in (set(Y_test) | set(Y_pred))]))]
     plotConfusionMatrix(
-        y_true=Y_test,
-        y_pred=Y_pred,
+        y_true=Y_test_fmt,
+        y_pred=Y_pred_fmt,
         labels=ordered_labels,
         title="Confusion matrix for GENIS",
         xlabel="GENIS",
@@ -386,11 +395,10 @@ if (args.image):
     # Calculate ordered labels from numeric values. This quite complex operation is
     # needed to show the labels in numerical order.
     # Only get the labels from the test set
-    LLM_labelsT = [str(l) for l in [data["LLM-score"] for data in DataDict_test]]
-    ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y_test + LLM_labelsT))])]
+#    LLM_labelsT = [str(l) for l in [data["LLM-score"] for data in DataDict_test]]
     # LLM vs Y_test
     plotConfusionMatrix(
-        y_true=Y_test,
+        y_true=Y_test_fmt,
         y_pred=LLM_labelsT,
         labels=ordered_labels,
         title="Confusion matrix for LLM",
@@ -400,10 +408,9 @@ if (args.image):
 
     plt.subplot(1, 3, 3)
     # Third confusion matrix (VADER vs Y_test)
-    ordered_labels = [str(v) for v in sorted([float(s) for s in (set(Y + V_labels))])]
     plotConfusionMatrix(
-        y_true=Y_test,
-        y_pred=V_labels,
+        y_true=Y_test_fmt,
+        y_pred=V_labels_fmt,
         labels=ordered_labels,
         title="Confusion matrix for VADER",
         xlabel="VADER",
@@ -415,7 +422,7 @@ if (args.image):
     plt.show()
 
 # Write the contents of all files into a new CSV file
-if (args.load is None):
+if (args.load is None or args.force):
     writeCSV(DataDict_train, DataDict_test, 'data/overall_results.csv')
 
 # Save the model to a file
