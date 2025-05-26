@@ -116,7 +116,7 @@ def process_grade(
         return rawReview, grade, state
 
 def main():
-    ver: str = "0.10.0"
+    ver: str = "0.11.0"
     # Labels for the text and rating in the jsonl file
     # The default values are the ones used in the Amazon reviews dataset
     label_text: str = "text"

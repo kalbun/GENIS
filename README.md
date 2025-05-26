@@ -1,21 +1,20 @@
 Valid up to versions:
-genisCalc   0.10.0
+genisCalc   0.11.0
 genisTrain  0.11.0
 
 # CHANGELOG
+
+0.11.0: Final release
 
 0.10.0: Switched from notebook to regular python file. Refactoring of many parts. No more sentiment cache, everything is now in the preprocessing cache. Involvement of LLM to give a score to the review.
 
 # OVERALL IDEA
 
-GENIS was written to verify if the text associated to Amazon reviews allow to build a numeric score more realistic and informative than the star number. Due to commercial and psychological pressure, the maximum score of five stars does not associate with exceptional purchasing experience, but rather to lack of negative issues (a common behaviour is to remove one star per issue). Yet, this flattens most of the scores to five stars, making not distinguishable very different reviews like "best purchase of my life" and "it was ok".
-
-GENIS attempts to reconstruct the numeric score by considering the review text in addition to initial score. GENIS uses a combination of traditional NLP and LLM to calculate a score from 1 to 10.
+GENIS was written to obtain a better explainability of the sentiment associated with Amazon reviews. 
 
 GENIS uses NLP techniques to extract sentiment-loaded pairs of nouns and adjectives (like "good music" or "yellow duck"). These context-unaware data are prefiltered by using VADER algorithm. The above-threshold nouns are then passed to a LLM along with the review, which attributes a sentiment (-1, 0 or +1) to each noun. By summing up separately the negative, neutral and positive sentiments, we obtain the three final scores of GENIS. To convert them into a number from 1 to 10, we trained a random forest regressor that gets in input the three GENIS scores and the original rating in stars.
 
-Preliminary tests suggest that GENIS performs better than the LLM and VADER separately when comparing calculated scores with human-made grades.
-Moreover, the nouns extracted from the review account for a better explainability of the score: the GENIS methodology not only grades the reviews, but can also explain which specific aspects contributed.
+Preliminary tests suggest that GENIS performs better than VADER and alike an LLM when comparing calculated scores with human-made grades.
 
 GENIS performs these steps on a review:
 - cleanup, unescaping and other regularisation operations.
@@ -164,6 +163,9 @@ List of space-separated directories:
 
 -l FILE:
   When genisTrain is loaded with a list of paths, it consolidates all the data in one single file called overall_results.csv. With this parameter, it is possible to skip the consolidation process and directly read that file. This flag has priority over the list of paths.
+  Note that genisTrain read all the data but can change the train/test proportion, and the predicted grades. Yet, it does not overwrite the file with new values, unless the flag -f (force) is specified.
+
+-i: generates confusion matrices.
 
 ### genisTrain output files
 
