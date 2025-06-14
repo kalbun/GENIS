@@ -299,17 +299,28 @@ data
                 # those with a compound score below 0.05
                 scores = analyze_sentiment(pairs = pairs, sid = sid)
                 filtered_pairs = [
-                    (pair.split()[1], pair.split()[0]) 
+                    (pair.split()[1], pair.split()[0], scores) 
                     for pair, score in scores.items()
+#                    if abs(score['compound']) >= 0.05
                     if abs(score['compound']) >= 0.05
                 ]
                 preprocessor.AddSubitemsToReviewCache(rawReview, {"pairs": filtered_pairs})
             if "nouns" in cachedReview:
                 # Use the cached nouns
                 filtered_nouns = cachedReview["nouns"]
+                # Also try to use cached VADER scores for nouns if available
+                if "nouns_vader_scores" in cachedReview:
+                    filtered_nouns_vader_scores = cachedReview["nouns_vader_scores"]
+                else:
+                    # Calculate VADER scores for each noun
+                    filtered_nouns_vader_scores = {noun: sid.polarity_scores(noun) for noun in filtered_nouns}
+                    preprocessor.AddSubitemsToReviewCache(rawReview, {"nouns_vader_scores": filtered_nouns_vader_scores})
             else:
                 filtered_nouns = sorted(list(set([noun for noun, _ in filtered_pairs])))
                 preprocessor.AddSubitemsToReviewCache(rawReview, {"nouns": filtered_nouns})
+                # Calculate VADER scores for each noun
+                filtered_nouns_vader_scores = {noun: sid.polarity_scores(noun) for noun in filtered_nouns}
+                preprocessor.AddSubitemsToReviewCache(rawReview, {"nouns_vader_scores": filtered_nouns_vader_scores})
 
             if "V-Whole" in cachedReview:
                 V_Whole = cachedReview["V-Whole"]
