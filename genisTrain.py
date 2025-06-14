@@ -13,6 +13,8 @@ import pickle
 from sklearn.model_selection import train_test_split
 from scipy.stats import spearmanr, pearsonr
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.naive_bayes import GaussianNB
 import sklearn.metrics
 from sklearn.metrics import f1_score, confusion_matrix, precision_score, recall_score
 from preprocessing import ReviewPreprocessor
@@ -139,7 +141,7 @@ def loadCSV(filename: str) -> dict:
 def plotConfusionMatrix(y_true: list, y_pred: list, labels: list, title: str, xlabel: str, ylabel: str):
     """Plot the confusion matrix."""
     cm = confusion_matrix(y_true, y_pred, labels=labels)
-    plt.imshow(cm, cmap=plt.cm.Grays)
+#    plt.imshow(cm, cmap=plt.cm.Grays)
 #    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Grays)
 #    plt.colorbar()
     # Set the title and labels
@@ -153,10 +155,14 @@ def plotConfusionMatrix(y_true: list, y_pred: list, labels: list, title: str, xl
     max_value = cm.max()
     for i in range(cm.shape[0]):
         for j in range(cm.shape[1]):
+            if (i == j and i >= 1 and i < 20):
+#                plt.gca().add_patch(plt.Rectangle((j-0.5, i-0.5), 1, 1, fill=False, edgecolor='lime', lw=0.5))
+                plt.gca().add_patch(plt.Rectangle((j-0.5, i-0.5), 1, 1, fill=True, color='lime', alpha=0.3))
             if cm[i, j] != 0:
-                color = "black" if cm[i, j] < max_value/2 else "white"
-                plt.text(j, i, format(cm[i, j], 'd'),
-                        ha="center", va="center", color=color)
+                if (i != j):
+                    plt.gca().add_patch(plt.Rectangle((j-0.5, i-0.5), 1, 1, fill=True, color='red', alpha=0.2))
+                plt.text(j, i, format(cm[i, j], 'd'),ha="center", va="center", color='black', fontsize=10)
+                # also set background color
 
 
 DataDict: dict = {}
@@ -278,8 +284,20 @@ model = RandomForestClassifier(
     max_leaf_nodes=25,
     min_samples_leaf=2,
     random_state=args.seed)
-#model = RandomForestClassifier(random_state=args.seed)
+
 """
+model = DecisionTreeClassifier(
+    criterion='gini',
+    max_depth=10,
+    min_samples_split=2,
+    max_leaf_nodes=20,
+    min_samples_leaf=1,
+    random_state=args.seed)
+"""
+
+"""
+# Random forest calibration
+
 from sklearn.model_selection import cross_val_score, KFold, GridSearchCV
 from sklearn.ensemble import RandomForestClassifier
 import numpy as np
@@ -336,32 +354,30 @@ for i, y in enumerate(Y_pred):
 
 # Evaluate the model
 print("Evaluation metrics, baseline = human grades:")
-print("Set\tF1-w\tF1-m\tF1-M\tSpearman")
+print("\n***Quantized domain (scores as labels)")
+print("Set\tF1-w\tF1-m\tF1-M")
 print(f"Train\t{f1_score(Y_train, model.predict(X_train), average='weighted'):.2f}",end="")
 print(f"\t{f1_score(Y_train, model.predict(X_train), average='micro'):.2f}",end="")
-print(f"\t{f1_score(Y_train, model.predict(X_train), average='macro'):.2f}",end="")
-print(f"\t{pearsonr([float(y) for y in Y_train], [float(y) for y in model.predict(X_train)])[0]:.2f}")
+print(f"\t{f1_score(Y_train, model.predict(X_train), average='macro'):.2f}")
 print(f"Test\t{f1_score(Y_test, Y_pred, average='weighted'):.2f}",end="")
 print(f"\t{f1_score(Y_test, Y_pred, average='micro'):.2f}",end="")  
-print(f"\t{f1_score(Y_test, Y_pred, average='macro'):.2f}",end="")
-print(f"\t{pearsonr([float(y) for y in Y_test], [float(y) for y in Y_pred])[0]:.2f}")
+print(f"\t{f1_score(Y_test, Y_pred, average='macro'):.2f}")
 print(f"VADER\t{f1_score(Y_test, V_labels, average='weighted'):.2f}",end="")
 print(f"\t{f1_score(Y_test, V_labels, average='micro'):.2f}",end="")
-print(f"\t{f1_score(Y_test, V_labels, average='macro'):.2f}",end="")
-print(f"\t{pearsonr([float(y) for y in Y_test], [float(y) for y in V_scores])[0]:.2f}\t(whole sample)")
+print(f"\t{f1_score(Y_test, V_labels, average='macro'):.2f}")
 print(f"LLM\t{f1_score(Y_test,LLM_labels, average='weighted'):.2f}",end="")
 print(f"\t{f1_score(Y_test, LLM_labels, average='micro'):.2f}",end="")
-print(f"\t{f1_score(Y_test, LLM_labels, average='macro'):.2f}",end="")
-print(f"\t{pearsonr([float(y) for y in Y_test], [float(y) for y in LLM_scores])[0]:.2f}\t(whole sample)")
+print(f"\t{f1_score(Y_test, LLM_labels, average='macro'):.2f}")
 
 # calculate MAE
-mae = sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in Y_pred])
-print(f"MAE for GENIS: {mae:.2f}")
-mae = sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in V_labels])
-print(f"MAE for VADER: {mae:.2f}")
-mae = sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in LLM_labels])
-print(f"MAE for LLM: {mae:.2f}")
-
+print("\n***Numerical domain (scores as numbers)")
+print("Set\tPearson\tMAE")
+print(f"GENIS\t{pearsonr([float(y) for y in Y_train], [float(y) for y in model.predict(X_train)])[0]:.2f}",end="\t")
+print(sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in Y_pred]))
+print(f"VADER\t{pearsonr([float(y) for y in Y_test], [float(y) for y in V_scores])[0]:.2f}\t(whole sample)",end="\t")
+print(sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in V_labels]))
+print(f"LLM\t{pearsonr([float(y) for y in Y_test], [float(y) for y in LLM_scores])[0]:.2f}\t(whole sample)",end="\t")
+print(sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in LLM_labels]))
 
 feature_names = ["O-score", "G-scoreP", "G-scoreM", "G-scoreN"]
 print("Feature importance (Random Forest):")
@@ -376,7 +392,7 @@ V_labels_fmt = [f"{float(v):.1f}" for v in V_labels]
 if (args.image):
     # Show the confusion matrices
     ordered_labels = [f"{(v/2):.1f}" for v in range(2, 21)]  # Assuming the labels are from 1 to 10
-
+    ordered_labels = [f"{(v/2):.1f}" for v in range(1, 22)]  # Assuming the labels are from 1 to 10
 
     plt.figure(figsize=(10, 7))
     plt.subplot(1, 3, 1)
@@ -417,7 +433,7 @@ if (args.image):
         ylabel="Human"
     )
 
-    plt.suptitle("Confusion matrices")  
+#    plt.suptitle("Confusion matrices")  
     plt.tight_layout()
     plt.show()
 
