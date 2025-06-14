@@ -20,7 +20,7 @@ from sklearn.metrics import f1_score, confusion_matrix, precision_score, recall_
 from preprocessing import ReviewPreprocessor
 import matplotlib.pyplot as plt
 
-ver: str = "0.11.0"
+ver: str = "0.12.0"
 # Labels for the text and rating in the jsonl file
 # The default values are the ones used in the Amazon reviews dataset
 label_text: str = "text"
@@ -374,9 +374,9 @@ print("\n***Numerical domain (scores as numbers)")
 print("Set\tPearson\tMAE")
 print(f"GENIS\t{pearsonr([float(y) for y in Y_train], [float(y) for y in model.predict(X_train)])[0]:.2f}",end="\t")
 print(sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in Y_pred]))
-print(f"VADER\t{pearsonr([float(y) for y in Y_test], [float(y) for y in V_scores])[0]:.2f}\t(whole sample)",end="\t")
+print(f"VADER\t{pearsonr([float(y) for y in Y_test], [float(y) for y in V_scores])[0]:.2f}",end="\t")
 print(sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in V_labels]))
-print(f"LLM\t{pearsonr([float(y) for y in Y_test], [float(y) for y in LLM_scores])[0]:.2f}\t(whole sample)",end="\t")
+print(f"LLM\t{pearsonr([float(y) for y in Y_test], [float(y) for y in LLM_scores])[0]:.2f}",end="\t")
 print(sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in LLM_labels]))
 
 feature_names = ["O-score", "G-scoreP", "G-scoreM", "G-scoreN"]
