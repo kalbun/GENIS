@@ -1,8 +1,10 @@
 Valid up to versions:
-genisCalc   0.11.0
-genisTrain  0.11.0
+genisCalc   0.12.0
+genisTrain  0.12.0
 
 # CHANGELOG
+
+0.12.0: Visualisation improvement for confusion matrices and comparison data.
 
 0.11.0: Final release
 

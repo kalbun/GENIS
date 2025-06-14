@@ -116,7 +116,7 @@ def process_grade(
         return rawReview, grade, state
 
 def main():
-    ver: str = "0.11.0"
+    ver: str = "0.12.0"
     # Labels for the text and rating in the jsonl file
     # The default values are the ones used in the Amazon reviews dataset
     label_text: str = "text"
@@ -301,7 +301,6 @@ data
                 filtered_pairs = [
                     (pair.split()[1], pair.split()[0], scores) 
                     for pair, score in scores.items()
-#                    if abs(score['compound']) >= 0.05
                     if abs(score['compound']) >= 0.05
                 ]
                 preprocessor.AddSubitemsToReviewCache(rawReview, {"pairs": filtered_pairs})
