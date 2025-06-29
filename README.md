@@ -1,6 +1,6 @@
 Valid up to versions:
-genisCalc   0.12.0
-genisTrain  0.12.0
+genisCalc   0.13.0
+genisTrain  0.13.0
 
 # CHANGELOG
 
@@ -60,7 +60,6 @@ The last phase is loading Spacy data. From the command line and inside the corre
 
     python -m spacy download en_core_web_sm
 
-
 ## run genisCalc
 
 ### Create key file
@@ -76,7 +75,50 @@ You can change the number of concurrent queries by modifying the semaphore init 
 
 You can use different LLMs, but you will need to manually modify the code in sentiments.py.
 
+### reproducing experiment results
+
+You can get acquainted with genisCalc and use it as you prefer. If you want to reproduce the results we achieved, there are a few more steps to execute:
+
+1) from https://amazon-reviews-2023.github.io/ download these review files:
+
+  https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw/review_categories/Digital_Music.jsonl.gz
+  https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw/review_categories/Magazine_Subscriptions.jsonl.gz
+  https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw/review_categories/Musical_Instruments.jsonl.gz
+  https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw/review_categories/Patio_Lawn_and_Garden.jsonl.gz
+  https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw/review_categories/Software.jsonl.gz
+
+  2) move them in the directory where genisCalc is located and unzip them. Ensure that the five json files are locaed in the same directory of genisCalc.
+
+  3) run genisCalc on each of the five files. This will take a LONG time because the script must clean the reviews and invoke the LLM. After the first run, data are cached and the operation becomes much faster.
+
+  4) at the end of this operation, you will find five subdirectories under the directory data.
+  IMPORTANT: unfortunately, there could be temporary issues with Mistral that make the sentiment evaluation fail. You can note it when, during the two phases of LLM calculation, you see one of more error symbols 'E' like this:
+
+    Calculating LLM scores for the reviews.
+    Approach 1: LLM scores for each relevant noun.
+    _ = calculated, C = cached, E = error, J = json error
+    _____E_____
+
+  If this happens, it is important to relaunch genisCalc until you see no error symbols. The operation should become increasingly fast as more and more data are cached. We are working to improve this aspect and beg for your patience.
+
+  5) It is now time to apply human grades. You will find in each subdirectory a file name selected_reviews.csv. Grades are set to zero and the task is to write down the human grades corresponding to each review.
+  To avoid you this boring task, you can run a script that will do the work for you:
+
+      python genisReplaceScores.py
+
+  The script works only if you executed genisCalc with the default seed.
+
+  6) now you can run genisTrain and check the results. See below the relevant section on how to execute genisCalc.
+
 ### command line parameters
+
+If you run:
+
+    python genisCalc.py
+
+you will get the list of command line parameters:
+
+    usage: genisCalc.py [-h] [-s SEED] [-m MAX_REVIEWS] [-v] filename
 
 genisCalc has several parameters that influence how it works.
 To get acquainted with them, you can add the -h or --help switch and
@@ -92,6 +134,9 @@ filename
 
 -m MAX_REVIEWS
   Limits the number of analysed reviews. Default is 1000.
+
+-v
+  Print the version and exit
 
 ### An example
 

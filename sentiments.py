@@ -46,7 +46,7 @@ class Sentiments:
                 break
             except SDKError:
                 retry_counter += 1
-                time.sleep(0.25)
+                time.sleep(0.15 * retry_counter)  # Exponential backoff
             except Exception:
                 break
         return response, success
