@@ -25,11 +25,15 @@ def analyze_sentiment(pairs: tuple[str, str],sid = None) -> dict[str, dict]:
     if sid is None:
         sid = SentimentIntensityAnalyzer()
     scores: dict[str, dict] = {}
-
-    for noun, adj in pairs:
+    for pair in pairs:
+        # Each pair is a tuple (adj, noun)
+        adj, noun = pair
+        # Create a phrase from the adjective and noun
         phrase = f"{adj} {noun}"
+        # Get the sentiment scores for the phrase
         score = sid.polarity_scores(phrase)
-        scores[phrase] = score
+        # Store the scores in the dictionary
+        scores[pair] = score
     return scores
 
 def cbDotPrint(index: int, total: int) -> None:
@@ -74,8 +78,12 @@ def process_review(
         state = "C"
         parsed_scores = cachedReview["parsed_scores"]
     else:
+        readableReview: str = rawReviewData["readable"]
+        pairs: list[tuple[str, str, dict]] = rawReviewData["pairs"]
+        nouns: list[str] = pairs and [noun for _, noun, _ in pairs]
         parsed_scores, state = sentimentsManager.gradeNounSentiment(
-            rawReviewData["readable"], rawReviewData["nouns"]
+            readableReview,
+            nouns,
         )
         if state in ("E", "J"):
             cachedReview = None
@@ -116,7 +124,7 @@ def process_grade(
         return rawReview, grade, state
 
 def main():
-    ver: str = "0.12.0"
+    ver: str = "0.13.0"
     # Labels for the text and rating in the jsonl file
     # The default values are the ones used in the Amazon reviews dataset
     label_text: str = "text"
@@ -211,12 +219,17 @@ data
     # calculated for each noun in filtered_reviews_dict(review).
     parsed_scores: dict[str, dict] = {}
 
-    for rawReview, rawReviewData in preprocessed_reviews.items():
+    print(f"Processing...")
+    for index, (rawReview, rawReviewData) in enumerate(preprocessed_reviews.items()):
+
+        if (index and (index % 100 == 0)):
+            print(f"{index} of {len(preprocessed_reviews)}", flush=True)
 
         # Check if the data we are about to calculate are already in the cache.
         # If so, skip the calculation.
         cachedReview = preprocessor.GetReviewFromCache(rawReview)
-        if cachedReview is not None and ("pairs" in cachedReview) and ("nouns" in cachedReview):
+#        if cachedReview is not None and ("pairs" in cachedReview) and ("nouns" in cachedReview):
+        if cachedReview is not None and ("pairs" in cachedReview):
             pass
         else:
             # If not, process the review to extract adjective-noun pairs.
@@ -279,9 +292,9 @@ data
     index: int = 0
     print("\nCalculating sentiment scores for the reviews...")
     for rawReview, rawReviewData in reviews_dict.items():
-        index += 1
-        if (index % 100) == 0:
+        if (index and index % 100) == 0:
             print(f"{index} of {len(reviews_dict)}")
+        index += 1
 
         cachedReview = preprocessor.GetReviewFromCache(rawReview)
         if cachedReview is not None:
@@ -294,16 +307,17 @@ data
                 else:
                     continue
             else:
+                filtered_pairs: list[tuple[str, str, dict]] = []
                 pairs = rawReviewData["pairs"]
                 # Calculate the sentiment scores for the pairs, then filter out
                 # those with a compound score below 0.05
-                scores = analyze_sentiment(pairs = pairs, sid = sid)
-                filtered_pairs = [
-                    (pair.split()[1], pair.split()[0], scores) 
-                    for pair, score in scores.items()
-                    if abs(score['compound']) >= 0.05
-                ]
+                pairsAndScores = analyze_sentiment(pairs = pairs, sid = sid)
+                for pair in pairsAndScores:
+                    scores = pairsAndScores[pair]
+                    if abs(scores['compound']) >= 0.05:
+                        filtered_pairs.append((pair[1], pair[0], scores))
                 preprocessor.AddSubitemsToReviewCache(rawReview, {"pairs": filtered_pairs})
+            """
             if "nouns" in cachedReview:
                 # Use the cached nouns
                 filtered_nouns = cachedReview["nouns"]
@@ -320,7 +334,7 @@ data
                 # Calculate VADER scores for each noun
                 filtered_nouns_vader_scores = {noun: sid.polarity_scores(noun) for noun in filtered_nouns}
                 preprocessor.AddSubitemsToReviewCache(rawReview, {"nouns_vader_scores": filtered_nouns_vader_scores})
-
+            """
             if "V-Whole" in cachedReview:
                 V_Whole = cachedReview["V-Whole"]
             else:
@@ -333,12 +347,10 @@ data
             "readable": rawReviewData["readable"],
             "corrected": rawReviewData["corrected"],
             "pairs": filtered_pairs,
-            "nouns": filtered_nouns,
+#            "nouns": filtered_nouns,
             "O-Score": rawReviewData["O-Score"],
             "V-Whole": V_Whole,
         }
-
-    print(f"{len(filtered_reviews_dict)} of {len(reviews_dict)} have relevant sentiments.")
 
     #
     # In this last step, we invoke a LLM to parse the sentiment score.
