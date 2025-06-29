@@ -20,7 +20,7 @@ from sklearn.metrics import f1_score, confusion_matrix, precision_score, recall_
 from preprocessing import ReviewPreprocessor
 import matplotlib.pyplot as plt
 
-ver: str = "0.12.0"
+ver: str = "0.13.0"
 # Labels for the text and rating in the jsonl file
 # The default values are the ones used in the Amazon reviews dataset
 label_text: str = "text"
@@ -81,7 +81,7 @@ def writeCSV(train_data, test_data, filename):
                 data["V-converted"],
                 data["LLM-score"],
                 data["VADER"],
-                data["review"],
+                data["readable"],
                 data["filename"]
             ])
         for data in test_data:
@@ -97,7 +97,7 @@ def writeCSV(train_data, test_data, filename):
                 data["V-converted"],
                 data["LLM-score"],
                 data["VADER"],
-                data["review"],
+                data["readable"],
                 data["filename"]
             ])
     print(f"Results written to {filename}")
