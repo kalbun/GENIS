@@ -279,10 +279,10 @@ LLM_labels = [ str(l) for l in LLM_scores]  # Adjust LLM scores to match the lab
 
 #model = RandomForestClassifier(n_estimators=32, min_samples_split=3, random_state=args.seed)
 model = RandomForestClassifier(
-    n_estimators=96,
-    max_depth=10,
-    max_leaf_nodes=25,
-    min_samples_leaf=2,
+    n_estimators=128,
+    criterion='log_loss',
+    max_depth=None,
+    max_leaf_nodes=15,
     random_state=args.seed)
 
 """
@@ -303,8 +303,8 @@ from sklearn.ensemble import RandomForestClassifier
 import numpy as np
 
 
-X = X_train + X_test
-y = Y_train + Y_test
+X = X_train
+y = Y_train
 # Convert the lists to numpy arrays for compatibility with scikit-learn
 X = np.array(X)
 y = np.array(y)
@@ -312,12 +312,11 @@ y = np.array(y)
 # Define the parameter grid for hyperparameter tuning
 param_grid = {
     'n_estimators': [x for x in range(48, 129, 8)],
-    'criterion': ['gini'],
+    'criterion': ['gini','log_loss'],
     'max_depth': [None, 10, 20],
-    'min_samples_split': [x for x in range(2, 4)],
+    'min_samples_split': [2, 4],
     'max_leaf_nodes': [None, 15, 20, 25],
     'min_samples_leaf': [1, 2],
-    'max_features': ['log2']
 }
 
 # Initialize GridSearchCV
@@ -342,7 +341,7 @@ print("Cross-Validation Scores:", scores)
 
 
 exit(0)
-#"""
+"""
 
 print(f"Training model with {len(X_train)} samples")
 model.fit(X_train, Y_train)
