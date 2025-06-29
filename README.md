@@ -4,6 +4,8 @@ genisTrain  0.13.0
 
 # CHANGELOG
 
+0.13.0: Added instructions for reproducing experiment results.
+
 0.12.0: Visualisation improvement for confusion matrices and comparison data.
 
 0.11.0: Final release
