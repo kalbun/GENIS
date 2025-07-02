@@ -277,71 +277,7 @@ LLM_scores = [data["LLM-score"] for data in DataDict.values()]
 LLM_scores = [data["LLM-score"] for data in DataDict_test]
 LLM_labels = [ str(l) for l in LLM_scores]  # Adjust LLM scores to match the labels
 
-#model = RandomForestClassifier(n_estimators=32, min_samples_split=3, random_state=args.seed)
-model = RandomForestClassifier(
-    n_estimators=128,
-    criterion='log_loss',
-    max_depth=None,
-    max_leaf_nodes=15,
-    random_state=args.seed)
-
-"""
-model = DecisionTreeClassifier(
-    criterion='gini',
-    max_depth=10,
-    min_samples_split=2,
-    max_leaf_nodes=20,
-    min_samples_leaf=1,
-    random_state=args.seed)
-"""
-
-"""
-# Random forest calibration
-
-from sklearn.model_selection import cross_val_score, KFold, GridSearchCV
-from sklearn.ensemble import RandomForestClassifier
-import numpy as np
-
-
-X = X_train
-y = Y_train
-# Convert the lists to numpy arrays for compatibility with scikit-learn
-X = np.array(X)
-y = np.array(y)
-
-# Define the parameter grid for hyperparameter tuning
-param_grid = {
-    'n_estimators': [x for x in range(48, 129, 8)],
-    'criterion': ['gini','log_loss'],
-    'max_depth': [None, 10, 20],
-    'min_samples_split': [2, 4],
-    'max_leaf_nodes': [None, 15, 20, 25],
-    'min_samples_leaf': [1, 2],
-}
-
-# Initialize GridSearchCV
-grid_search = GridSearchCV(estimator=model, param_grid=param_grid, cv=5, scoring='accuracy', n_jobs=-1)
-
-# Perform grid search
-grid_search.fit(X, y)
-
-# Print the best parameters and the best score
-print("Best Parameters:", grid_search.best_params_)
-print("Best Score:", grid_search.best_score_)
-
-# Initialize k-fold cross-validation
-kfold = KFold(n_splits=5, shuffle=True, random_state=args.seed)
-
-# Perform cross-validation with the best model
-best_model = grid_search.best_estimator_
-scores = cross_val_score(best_model, X, y, cv=kfold, scoring='accuracy')
-
-# Print the cross-validation scores
-print("Cross-Validation Scores:", scores)
-
-
-exit(0)
-"""
+model = RandomForestClassifier(random_state=args.seed)
 
 print(f"Training model with {len(X_train)} samples")
 model.fit(X_train, Y_train)
