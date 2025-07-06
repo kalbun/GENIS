@@ -1,4 +1,5 @@
 import os
+import nltk
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 import spacy
 import re
@@ -183,6 +184,7 @@ data
     print("Loading SpaCy model...")
     nlp = spacy.load("en_core_web_sm")
     # Initialize the VADER sentiment analyzer
+    print("Loading VADER sentiment analyzer...")
     sid = SentimentIntensityAnalyzer()
 
     # Load a random sample of reviews from the file.
@@ -229,7 +231,8 @@ data
         # If so, skip the calculation.
         cachedReview = preprocessor.GetReviewFromCache(rawReview)
 #        if cachedReview is not None and ("pairs" in cachedReview) and ("nouns" in cachedReview):
-        if cachedReview is not None and ("pairs" in cachedReview):
+        if 0:
+#        if cachedReview is not None and ("pairs" in cachedReview):
             pass
         else:
             # If not, process the review to extract adjective-noun pairs.
@@ -259,6 +262,17 @@ data
                                 # adjective modifier (e.g., "good" in "good music")
                                 pairs.append((token.text, child.text))
                                 nouns.append(token.text)
+                            elif child.pos_ == "VERB":
+                                # nominal subject (e.g., "product" in "I love this product")
+                                for grandchild in child.children:
+                                    if grandchild.pos_ == "NOUN":
+                                        # grandchild is the noun subject of the verb
+                                        pairs.append((grandchild.text, child.text))
+                                        nouns.append(grandchild.text)
+                            elif child.dep_ == "acomp":
+                                # adjectival complement (e.g., "good" in "the product is good")
+                                pairs.append((child.text, token.text))
+                                nouns.append(child.text)    
                     elif token.dep_ == "acomp":
                         # adjectival complement (e.g., "good" in "the product is good").
                         # Now search its subject (the noun).
