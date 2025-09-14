@@ -9,6 +9,7 @@ import concurrent.futures
 
 from preprocessing import ReviewPreprocessor
 from sentiments import Sentiments
+from genisCore import genisCore
 
 # Define the analyze_sentiment function
 def analyze_sentiment(pairs: tuple[str, str],sid = None) -> dict[str, dict]:
@@ -124,7 +125,7 @@ def process_grade(
         return rawReview, grade, state
 
 def main():
-    ver: str = "0.13.0"
+    ver: str = "0.14.0"
     # Labels for the text and rating in the jsonl file
     # The default values are the ones used in the Amazon reviews dataset
     label_text: str = "text"
@@ -132,8 +133,8 @@ def main():
 
     # Create an instance of classes used in the script.
     # Initialization postponed as it requires the cache path, calculated later.
-    sentimentsManager: Sentiments = None
-    preprocessor: ReviewPreprocessor = None
+    sentimentsManager: Sentiments
+    preprocessor: ReviewPreprocessor
 
     print(f"GENIS calc v{ver}")
     parser = argparse.ArgumentParser()
@@ -231,50 +232,12 @@ data
 #        if cachedReview is not None and ("pairs" in cachedReview) and ("nouns" in cachedReview):
         if cachedReview is not None and ("pairs" in cachedReview):
             pass
-        else:
+        else:        
             # If not, process the review to extract adjective-noun pairs.
             # split sentences on hard punctuation (periods, exclamation marks, question marks)
-            pairs = []
-            nouns = []
-            # This regex splits on periods, exclamation marks, and question marks,
-            sentences = re.split(r'(?<=[.!?]) +', rawReviewData["corrected"])
-            for sentence in sentences:
-                sentence = sentence.strip()
-                if len(sentence) < 4:
-                    continue
-                # Process the sentence with SpaCy.
-                # This is the core idea of the method: we assume that the sentiment in a review
-                # is mainly expressed by nouns combined with adjectives, like in "good music"
-                # or "awful service"
-                # The extraction uses Spacy.
-                # - "amod" means adjectival modifier (e.g., "good" in "good music")
-                # - "acomp" means adjectival complement (e.g., "good" in "the product is good")
-                # - "nsubj" means nominal subject (e.g., "product" in "the product is good") 
-                doc = nlp(sentence)
-                for token in doc:
-                    if token.pos_ == "NOUN":
-                        # Token "children" are the words that depend on it.
-                        for child in token.children:
-                            if child.dep_ == "amod":
-                                # adjective modifier (e.g., "good" in "good music")
-                                pairs.append((token.text, child.text))
-                                nouns.append(token.text)
-                    elif token.dep_ == "acomp":
-                        # adjectival complement (e.g., "good" in "the product is good").
-                        # Now search its subject (the noun).
-                        subjects = [child for child in token.head.children if child.dep_ == "nsubj"]
-                        if subjects:
-                            # Found, we can add the pair
-                            pairs.append((subjects[0].text, token.text))
-                            nouns.append(subjects[0].text)
-
-            # Lemmatization is useful for cases where singual and plural forms are used
-            # interchangeably, like "good music" and "good musics".
-            pairs = [(preprocessor.LemmatizeText(noun), adj) for noun, adj in pairs]
-            # Remove duplicates from pairs
-            pairs = sorted(list(set(pairs)))
-            # Recalculate the nouns based on the pairs
-            nouns = sorted(list(set([noun for noun, _ in pairs])))
+            pairs: list[tuple[str, str]] = []
+            nouns: list[str] = []
+            pairs, nouns = genisCore(rawReview, preprocessor, nlp)
 
         # Add the pairs to the review_dict for later sentiment analysis.
         # Differently, the review_dict uses the corrected review text as the key.
