@@ -20,7 +20,7 @@ from sklearn.metrics import f1_score, confusion_matrix, precision_score, recall_
 from preprocessing import ReviewPreprocessor
 import matplotlib.pyplot as plt
 
-ver: str = "0.13.0"
+ver: str = "0.14.0"
 # Labels for the text and rating in the jsonl file
 # The default values are the ones used in the Amazon reviews dataset
 label_text: str = "text"
@@ -218,7 +218,7 @@ elif len(args.paths) != 0:
             reader = csv.DictReader(csvfile)
             for row in reader:
                 review = row['review']
-                Y = float(row['hscore'])  # Convert human score to float
+                y_score = float(row['hscore'])  # Convert human score to float
 
                 # Retrieve data from the preprocessing cache
                 cached_data = preprocessor.GetReviewFromCache(review)
@@ -231,8 +231,8 @@ elif len(args.paths) != 0:
                         "G-scoreP": sum([score for score in parsed_scores.values() if score > 0]),
                         "G-scoreM": sum([score for score in parsed_scores.values() if score < 0]),
                         "G-scoreN": sum([score for score in parsed_scores.values() if score == 0]),
-                        "Y": str(Y),
-                        "Y-pred": str(Y),  # Placeholder for predictions
+                        "Y": str(y_score),
+                        "Y-pred": str(y_score),  # Placeholder for predictions
                         "VADER": cached_data.get("V-Whole", 0),
                         # convert VADER score to a 1-10 scale with half grades
                         "V-converted": round( ((cached_data.get("V-Whole", 0) + 1) * 4.5 + 1) * 2, 0) / 2,
@@ -278,22 +278,22 @@ LLM_scores = [data["LLM-score"] for data in DataDict_test]
 LLM_labels = [ str(l) for l in LLM_scores]  # Adjust LLM scores to match the labels
 
 #model = RandomForestClassifier(n_estimators=32, min_samples_split=3, random_state=args.seed)
-model = RandomForestClassifier(
+modelRF = RandomForestClassifier(
     n_estimators=128,
     criterion='log_loss',
     max_depth=None,
     max_leaf_nodes=15,
     random_state=args.seed)
 
-"""
-model = DecisionTreeClassifier(
+modelDT = DecisionTreeClassifier(
     criterion='gini',
     max_depth=10,
     min_samples_split=2,
     max_leaf_nodes=20,
     min_samples_leaf=1,
     random_state=args.seed)
-"""
+
+modelNB = GaussianNB()
 
 """
 # Random forest calibration
@@ -343,105 +343,269 @@ print("Cross-Validation Scores:", scores)
 exit(0)
 """
 
-print(f"Training model with {len(X_train)} samples")
-model.fit(X_train, Y_train)
-# Make predictions on the test set
-print(f"Predicting {len(X_test)} samples")
-Y_pred = model.predict(X_test)
-for i, y in enumerate(Y_pred):
-    DataDict_test[i]["Y-pred"] = y
+# Replace the per-model immediate-printing loop with a collection + unified reporting
+models = [modelRF, modelDT, modelNB]
+metrics = {}
+predictions_test = {}
 
-# Evaluate the model
-print("Evaluation metrics, baseline = human grades:")
-print("\n***Quantized domain (scores as labels)")
-print("Set\tF1-w\tF1-m\tF1-M")
-print(f"Train\t{f1_score(Y_train, model.predict(X_train), average='weighted'):.2f}",end="")
-print(f"\t{f1_score(Y_train, model.predict(X_train), average='micro'):.2f}",end="")
-print(f"\t{f1_score(Y_train, model.predict(X_train), average='macro'):.2f}")
-print(f"Test\t{f1_score(Y_test, Y_pred, average='weighted'):.2f}",end="")
-print(f"\t{f1_score(Y_test, Y_pred, average='micro'):.2f}",end="")  
-print(f"\t{f1_score(Y_test, Y_pred, average='macro'):.2f}")
-print(f"VADER\t{f1_score(Y_test, V_labels, average='weighted'):.2f}",end="")
-print(f"\t{f1_score(Y_test, V_labels, average='micro'):.2f}",end="")
-print(f"\t{f1_score(Y_test, V_labels, average='macro'):.2f}")
-print(f"LLM\t{f1_score(Y_test,LLM_labels, average='weighted'):.2f}",end="")
-print(f"\t{f1_score(Y_test, LLM_labels, average='micro'):.2f}",end="")
-print(f"\t{f1_score(Y_test, LLM_labels, average='macro'):.2f}")
+for model in models:
+    name = model.__class__.__name__
+    print(f"Training model: {name}")
+    print(f"Training model with {len(X_train)} samples")
+    model.fit(X_train, Y_train)
 
-# calculate MAE
-print("\n***Numerical domain (scores as numbers)")
-print("Set\tPearson\tMAE")
-print(f"GENIS\t{pearsonr([float(y) for y in Y_train], [float(y) for y in model.predict(X_train)])[0]:.2f}",end="\t")
-print(sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in Y_pred]))
-print(f"VADER\t{pearsonr([float(y) for y in Y_test], [float(y) for y in V_scores])[0]:.2f}",end="\t")
-print(sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in V_labels]))
-print(f"LLM\t{pearsonr([float(y) for y in Y_test], [float(y) for y in LLM_scores])[0]:.2f}",end="\t")
-print(sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in LLM_labels]))
+    print(f"Predicting {len(X_test)} samples")
+    Y_pred = model.predict(X_test)
+    predictions_test[name] = list(Y_pred)
+    for i, y in enumerate(Y_pred):
+        DataDict_test[i]["Y-pred"] = y
 
-feature_names = ["O-score", "G-scoreP", "G-scoreM", "G-scoreN"]
-print("Feature importance (Random Forest):")
-for i, feature in enumerate(feature_names):
-    print(f"{feature}: {model.feature_importances_[i]:.4f}")
+    # Quantized metrics (F1)
+    f1_train_w = f1_score(Y_train, model.predict(X_train), average='weighted')
+    f1_train_m = f1_score(Y_train, model.predict(X_train), average='micro')
+    f1_train_M = f1_score(Y_train, model.predict(X_train), average='macro')
 
-Y_test_fmt = [f"{float(y):.1f}" for y in Y_test]
-Y_pred_fmt = [f"{float(y):.1f}" for y in Y_pred]
-LLM_labelsT = [f"{float(data["LLM-score"]):.1f}" for data in DataDict_test]
-V_labels_fmt = [f"{float(v):.1f}" for v in V_labels]
+    f1_test_w = f1_score(Y_test, Y_pred, average='weighted')
+    f1_test_m = f1_score(Y_test, Y_pred, average='micro')
+    f1_test_M = f1_score(Y_test, Y_pred, average='macro')
 
-if (args.image):
-    # Show the confusion matrices
-    ordered_labels = [f"{(v/2):.1f}" for v in range(2, 21)]  # Assuming the labels are from 1 to 10
-    ordered_labels = [f"{(v/2):.1f}" for v in range(1, 22)]  # Assuming the labels are from 1 to 10
+    # Numerical metrics (Pearson on train GENIS, MAE on test)
+    try:
+        pearson_train = pearsonr([float(y) for y in Y_train], [float(y) for y in model.predict(X_train)])[0]
+    except Exception:
+        pearson_train = float('nan')
+    try:
+        mae_test = sklearn.metrics.mean_absolute_error([float(y) for y in Y_test], [float(y) for y in Y_pred])
+    except Exception:
+        mae_test = float('nan')
 
-    plt.figure(figsize=(10, 7))
-    plt.subplot(1, 3, 1)
-    # Y_pred vs Y_test
+    # Feature importance where available
+    feat_imp = None
+    if hasattr(model, "feature_importances_"):
+        feat_imp = list(model.feature_importances_)
+    elif hasattr(model, "coef_"):
+        coef = getattr(model, "coef_")
+        # flatten linear model coef if necessary
+        try:
+            feat_imp = list(coef.ravel())
+        except Exception:
+            feat_imp = list(coef)
+
+    metrics[name] = {
+        "f1_train": (f1_train_w, f1_train_m, f1_train_M),
+        "f1_test":  (f1_test_w,  f1_test_m,  f1_test_M),
+        "pearson_train": pearson_train,
+        "mae_test": mae_test,
+        "feature_importance": feat_imp
+    }
+
+    # keep CSV write / model dumping behavior as before
+    if (args.load is None or args.force):
+        writeCSV(DataDict_train, DataDict_test, f'data/{model.__class__.__name__[:8]}_overall_results.csv')
+
+    with open(f'data/{model.__class__.__name__[:8]}_random_forest_classifier.pkl', 'wb') as model_file:
+        pickle.dump(modelRF, model_file)
+    print(f"Model dumped successfully in data/{model.__class__.__name__[:8]}_random_forest_classifier.pkl (pickle format).")
+
+# --- Unified aggregated reporting ---
+
+# Baseline labels (already strings in earlier code)
+V_labels = [str(v) for v in V_scores]
+LLM_labels = [str(l) for l in LLM_scores]
+
+def fmt(v):
+    return f"{v:.2f}" if isinstance(v, float) and not (v != v) else "n/a"  # v!=v to detect NaN
+
+# Quantized domain: one table with nine F1 columns
+print("\nQuantized domain - aggregated F1 table")
+hdr = [
+    "Set",
+    "F1-w_RF", "F1-w_DT", "F1-w_NB",
+    "F1-m_RF", "F1-m_DT", "F1-m_NB",
+    "F1-M_RF", "F1-M_DT", "F1-M_NB"
+]
+print("\t".join(hdr))
+
+def get_f1(model_name, which, idx):
+    m = metrics.get(model_name, {})
+    vals = m.get(which)
+    return fmt(vals[idx]) if vals is not None else "n/a"
+
+# Train row
+train_row = [
+    "Train",
+    get_f1("RandomForestClassifier", "f1_train", 0),
+    get_f1("DecisionTreeClassifier", "f1_train", 0),
+    get_f1("GaussianNB", "f1_train", 0),
+    get_f1("RandomForestClassifier", "f1_train", 1),
+    get_f1("DecisionTreeClassifier", "f1_train", 1),
+    get_f1("GaussianNB", "f1_train", 1),
+    get_f1("RandomForestClassifier", "f1_train", 2),
+    get_f1("DecisionTreeClassifier", "f1_train", 2),
+    get_f1("GaussianNB", "f1_train", 2),
+]
+print("\t".join(train_row))
+
+# Test row
+test_row = [
+    "Test",
+    get_f1("RandomForestClassifier", "f1_test", 0),
+    get_f1("DecisionTreeClassifier", "f1_test", 0),
+    get_f1("GaussianNB", "f1_test", 0),
+    get_f1("RandomForestClassifier", "f1_test", 1),
+    get_f1("DecisionTreeClassifier", "f1_test", 1),
+    get_f1("GaussianNB", "f1_test", 1),
+    get_f1("RandomForestClassifier", "f1_test", 2),
+    get_f1("DecisionTreeClassifier", "f1_test", 2),
+    get_f1("GaussianNB", "f1_test", 2),
+]
+print("\t".join(test_row))
+
+# Baseline rows (same values repeated across classifier columns for easy comparison)
+try:
+    vader_f1 = f1_score(Y_test, V_labels, average='weighted')
+except Exception:
+    vader_f1 = float('nan')
+try:
+    llm_f1 = f1_score(Y_test, LLM_labels, average='weighted')
+except Exception:
+    llm_f1 = float('nan')
+
+vader_row = ["VADER"] + [fmt(vader_f1)]*3 + [fmt(vader_f1)]*3 + [fmt(vader_f1)]*3
+llm_row = ["LLM"] + [fmt(llm_f1)]*3 + [fmt(llm_f1)]*3 + [fmt(llm_f1)]*3
+print("\t".join(vader_row))
+print("\t".join(llm_row))
+
+# Numerical domain: three columns for Pearson (RF,DT,NB) and three for MAE
+print("\nNumerical domain - Pearson (train) and MAE (test)")
+hdr2 = ["Set", "PearRF", "PearDT", "PearNB", "MAE_RF", "MAE_DT", "MAE_NB"]
+print("\t".join(hdr2))
+
+pearson_rf = metrics.get("RandomForestClassifier", {}).get("pearson_train", float('nan'))
+pearson_dt = metrics.get("DecisionTreeClassifier", {}).get("pearson_train", float('nan'))
+pearson_nb = metrics.get("GaussianNB", {}).get("pearson_train", float('nan'))
+
+mae_rf = metrics.get("RandomForestClassifier", {}).get("mae_test", float('nan'))
+mae_dt = metrics.get("DecisionTreeClassifier", {}).get("mae_test", float('nan'))
+mae_nb = metrics.get("GaussianNB", {}).get("mae_test", float('nan'))
+
+print("GENIS\t" + "\t".join(fmt(x) for x in [pearson_rf, pearson_dt, pearson_nb, mae_rf, mae_dt, mae_nb]))
+
+# Baselines computed against numeric Y_test
+Y_test_nums = [float(y) for y in Y_test]
+try:
+    vader_pearson = pearsonr(Y_test_nums, [float(v) for v in V_scores])[0]
+    vader_mae = sklearn.metrics.mean_absolute_error(Y_test_nums, [float(v) for v in V_scores])
+except Exception:
+    vader_pearson = float('nan'); vader_mae = float('nan')
+try:
+    llm_pearson = pearsonr(Y_test_nums, [float(l) for l in LLM_scores])[0]
+    llm_mae = sklearn.metrics.mean_absolute_error(Y_test_nums, [float(l) for l in LLM_scores])
+except Exception:
+    llm_pearson = float('nan'); llm_mae = float('nan')
+
+# repeat baseline metrics across three classifier columns for easy column-wise comparison
+print("VADER\t" + "\t".join(fmt(x) for x in [vader_pearson, vader_pearson, vader_pearson, vader_mae, vader_mae, vader_mae]))
+print("LLM\t"   + "\t".join(fmt(x) for x in [llm_pearson, llm_pearson, llm_pearson, llm_mae, llm_mae, llm_mae]))
+
+# Feature importance: row per feature, three classifier columns
+print("\nFeature importance (per feature: RF, DT, NB)")
+feat_hdr = ["Feature\t", "RF", "DT", "NB"]
+print("\t".join(feat_hdr))
+feature_names = ["O-score ", "G-scoreP", "G-scoreM", "G-scoreN"]
+for idx, fname in enumerate(feature_names):
+    rf_val = metrics.get("RandomForestClassifier", {}).get("feature_importance")
+    dt_val = metrics.get("DecisionTreeClassifier", {}).get("feature_importance")
+    nb_val = metrics.get("GaussianNB", {}).get("feature_importance")
+    rf_str = f"{rf_val[idx]:.3f}" if rf_val and len(rf_val) > idx else "n/a"
+    dt_str = f"{dt_val[idx]:.3f}" if dt_val and len(dt_val) > idx else "n/a"
+    nb_str = f"{nb_val[idx]:.3f}" if nb_val and len(nb_val) > idx else "n/a"
+    print("\t".join([fname, rf_str, dt_str, nb_str]))
+
+# Confusion matrices: three GENIS matrices (RF, DT, NB) + LLM + VADER
+if args.image:
+    # prepare label set from numeric sources and produce ordered label strings
+    label_nums = set()
+    for y in Y_test:
+        try:
+            label_nums.add(float(y))
+        except Exception:
+            pass
+    for v in V_scores:
+        try:
+            label_nums.add(float(v))
+        except Exception:
+            pass
+    for l in LLM_scores:
+        try:
+            label_nums.add(float(l))
+        except Exception:
+            pass
+    # add 0.5 and 10.5 so that the charts are not clipped
+    label_nums.add(0.5)
+    label_nums.add(10.5)
+    ordered_labels = [f"{v:.1f}" for v in sorted(label_nums)]
+
+    Y_test_fmt = [f"{float(y):.1f}" for y in Y_test]
+    plt.figure(figsize=(15, 8))
+
+    # GENIS confusion matrices (RF, DT, NB)
+    for i, mname in enumerate(["RandomForestClassifier", "DecisionTreeClassifier", "GaussianNB"], start=1):
+        plt.subplot(2, 3, i)
+        preds = predictions_test.get(mname, [])
+        preds_fmt = []
+        for p in preds:
+            try:
+                preds_fmt.append(f"{float(p):.1f}")
+            except Exception:
+                preds_fmt.append(str(p))
+        plotConfusionMatrix(
+            y_true=Y_test_fmt,
+            y_pred=preds_fmt,
+            labels=ordered_labels,
+            title=f"GENIS ({mname})",
+            xlabel="GENIS",
+            ylabel="Human"
+        )
+
+    # LLM
+    plt.subplot(2, 3, 4)
+    LLM_fmt = []
+    for l in LLM_scores:
+        try:
+            LLM_fmt.append(f"{float(l):.1f}")
+        except Exception:
+            LLM_fmt.append(str(l))
     plotConfusionMatrix(
         y_true=Y_test_fmt,
-        y_pred=Y_pred_fmt,
+        y_pred=LLM_fmt,
         labels=ordered_labels,
-        title="Confusion matrix for GENIS",
-        xlabel="GENIS",
-        ylabel="Human"
-    )
-
-
-    plt.subplot(1, 3, 2)
-    # Calculate ordered labels from numeric values. This quite complex operation is
-    # needed to show the labels in numerical order.
-    # Only get the labels from the test set
-#    LLM_labelsT = [str(l) for l in [data["LLM-score"] for data in DataDict_test]]
-    # LLM vs Y_test
-    plotConfusionMatrix(
-        y_true=Y_test_fmt,
-        y_pred=LLM_labelsT,
-        labels=ordered_labels,
-        title="Confusion matrix for LLM",
+        title="LLM",
         xlabel="LLM",
         ylabel="Human"
     )
 
-    plt.subplot(1, 3, 3)
-    # Third confusion matrix (VADER vs Y_test)
+    # VADER
+    plt.subplot(2, 3, 5)
+    V_fmt = []
+    for v in V_scores:
+        try:
+            V_fmt.append(f"{float(v):.1f}")
+        except Exception:
+            V_fmt.append(str(v))
     plotConfusionMatrix(
         y_true=Y_test_fmt,
-        y_pred=V_labels_fmt,
+        y_pred=V_fmt,
         labels=ordered_labels,
-        title="Confusion matrix for VADER",
+        title="VADER",
         xlabel="VADER",
         ylabel="Human"
     )
 
-#    plt.suptitle("Confusion matrices")  
+    plt.subplot(2, 3, 6)
+    plt.axis('off')
+
     plt.tight_layout()
     plt.show()
 
-# Write the contents of all files into a new CSV file
-if (args.load is None or args.force):
-    writeCSV(DataDict_train, DataDict_test, 'data/overall_results.csv')
-
-# Save the model to a file
-with open('data/random_forest_classifier.pkl', 'wb') as model_file:
-    pickle.dump(model, model_file)
-print("Model dumped successfully in data/random_forest_classifier.pkl (pickle format).")
 print("Done.")
