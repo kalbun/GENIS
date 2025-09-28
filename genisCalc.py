@@ -333,10 +333,10 @@ data
         index = 0
         for future in concurrent.futures.as_completed(futures):
             rawReview, parsed_scores, state = future.result()
-            print(f"{state}", end="")
+            print(f"{state}", end="", flush=True)
             index += 1
             if (index % 100) == 0:
-                print(f" {index} of {len(filtered_reviews_dict)}")
+                print(f" {index} of {len(filtered_reviews_dict)}", flush=True)
             if state == "E" or state == "J":
                 # If there was an error, there is nothing to do.
                 continue
@@ -363,9 +363,9 @@ data
         for future in concurrent.futures.as_completed(futures_grade):
             rawReview, grade, state = future.result()
             index += 1
-            print(f"{state}", end="")
+            print(f"{state}", end="", flush=True)
             if (index % 100) == 0:
-                print(f" {index} of {len(filtered_reviews_dict)}")
+                print(f" {index} of {len(filtered_reviews_dict)}", flush=True)
             if state == "E":
                 grade = 0
             filtered_reviews_dict[rawReview]["LLM-score"] = grade
