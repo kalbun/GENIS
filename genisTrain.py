@@ -19,8 +19,9 @@ import sklearn.metrics
 from sklearn.metrics import f1_score, confusion_matrix, precision_score, recall_score
 from preprocessing import ReviewPreprocessor
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
-ver: str = "0.14.0"
+ver: str = "0.15.0"
 # Labels for the text and rating in the jsonl file
 # The default values are the ones used in the Amazon reviews dataset
 label_text: str = "text"
@@ -28,7 +29,7 @@ label_rating: str = "rating"
 
 # Create an instance of class used in the script.
 # Initialization postponed as it requires the cache path, calculated later.
-preprocessor: ReviewPreprocessor = None
+preprocessor: ReviewPreprocessor
 
 # Dictionary to store the data acquired from the csv files and the caches
 DataDict: dict = {}
@@ -157,10 +158,10 @@ def plotConfusionMatrix(y_true: list, y_pred: list, labels: list, title: str, xl
         for j in range(cm.shape[1]):
             if (i == j and i >= 1 and i < 20):
 #                plt.gca().add_patch(plt.Rectangle((j-0.5, i-0.5), 1, 1, fill=False, edgecolor='lime', lw=0.5))
-                plt.gca().add_patch(plt.Rectangle((j-0.5, i-0.5), 1, 1, fill=True, color='lime', alpha=0.3))
+                plt.gca().add_patch(patches.Rectangle((j-0.5, i-0.5), 1, 1, fill=True, color='lime', alpha=0.3))
             if cm[i, j] != 0:
                 if (i != j):
-                    plt.gca().add_patch(plt.Rectangle((j-0.5, i-0.5), 1, 1, fill=True, color='red', alpha=0.2))
+                    plt.gca().add_patch(patches.Rectangle((j-0.5, i-0.5), 1, 1, fill=True, color='red', alpha=0.2))
                 plt.text(j, i, format(cm[i, j], 'd'),ha="center", va="center", color='black', fontsize=10)
                 # also set background color
 
@@ -277,7 +278,6 @@ LLM_scores = [data["LLM-score"] for data in DataDict.values()]
 LLM_scores = [data["LLM-score"] for data in DataDict_test]
 LLM_labels = [ str(l) for l in LLM_scores]  # Adjust LLM scores to match the labels
 
-#model = RandomForestClassifier(n_estimators=32, min_samples_split=3, random_state=args.seed)
 modelRF = RandomForestClassifier(
     n_estimators=128,
     criterion='log_loss',
@@ -299,7 +299,7 @@ modelNB = GaussianNB()
 # Random forest calibration
 
 from sklearn.model_selection import cross_val_score, KFold, GridSearchCV
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForest
 import numpy as np
 
 
@@ -401,11 +401,11 @@ for model in models:
 
     # keep CSV write / model dumping behavior as before
     if (args.load is None or args.force):
-        writeCSV(DataDict_train, DataDict_test, f'data/{model.__class__.__name__[:8]}_overall_results.csv')
+        writeCSV(DataDict_train, DataDict_test, f'data/{model.__class__.__name__}_overall_results.csv')
 
-    with open(f'data/{model.__class__.__name__[:8]}_random_forest_classifier.pkl', 'wb') as model_file:
+    with open(f'data/{model.__class__.__name__}.pkl', 'wb') as model_file:
         pickle.dump(modelRF, model_file)
-    print(f"Model dumped successfully in data/{model.__class__.__name__[:8]}_random_forest_classifier.pkl (pickle format).")
+    print(f"Model dumped successfully in data/{model.__class__.__name__}.pkl (pickle format).")
 
 # --- Unified aggregated reporting ---
 
@@ -434,14 +434,14 @@ def get_f1(model_name, which, idx):
 # Train row
 train_row = [
     "Train",
-    get_f1("RandomForestClassifier", "f1_train", 0),
-    get_f1("DecisionTreeClassifier", "f1_train", 0),
+    get_f1("RandomForest", "f1_train", 0),
+    get_f1("DecisionTree", "f1_train", 0),
     get_f1("GaussianNB", "f1_train", 0),
-    get_f1("RandomForestClassifier", "f1_train", 1),
-    get_f1("DecisionTreeClassifier", "f1_train", 1),
+    get_f1("RandomForest", "f1_train", 1),
+    get_f1("DecisionTree", "f1_train", 1),
     get_f1("GaussianNB", "f1_train", 1),
-    get_f1("RandomForestClassifier", "f1_train", 2),
-    get_f1("DecisionTreeClassifier", "f1_train", 2),
+    get_f1("RandomForest", "f1_train", 2),
+    get_f1("DecisionTree", "f1_train", 2),
     get_f1("GaussianNB", "f1_train", 2),
 ]
 print("\t".join(train_row))
@@ -449,14 +449,14 @@ print("\t".join(train_row))
 # Test row
 test_row = [
     "Test",
-    get_f1("RandomForestClassifier", "f1_test", 0),
-    get_f1("DecisionTreeClassifier", "f1_test", 0),
+    get_f1("RandomForest", "f1_test", 0),
+    get_f1("DecisionTree", "f1_test", 0),
     get_f1("GaussianNB", "f1_test", 0),
-    get_f1("RandomForestClassifier", "f1_test", 1),
-    get_f1("DecisionTreeClassifier", "f1_test", 1),
+    get_f1("RandomForest", "f1_test", 1),
+    get_f1("DecisionTree", "f1_test", 1),
     get_f1("GaussianNB", "f1_test", 1),
-    get_f1("RandomForestClassifier", "f1_test", 2),
-    get_f1("DecisionTreeClassifier", "f1_test", 2),
+    get_f1("RandomForest", "f1_test", 2),
+    get_f1("DecisionTree", "f1_test", 2),
     get_f1("GaussianNB", "f1_test", 2),
 ]
 print("\t".join(test_row))
@@ -481,12 +481,12 @@ print("\nNumerical domain - Pearson (train) and MAE (test)")
 hdr2 = ["Set", "PearRF", "PearDT", "PearNB", "MAE_RF", "MAE_DT", "MAE_NB"]
 print("\t".join(hdr2))
 
-pearson_rf = metrics.get("RandomForestClassifier", {}).get("pearson_train", float('nan'))
-pearson_dt = metrics.get("DecisionTreeClassifier", {}).get("pearson_train", float('nan'))
+pearson_rf = metrics.get("RandomForest", {}).get("pearson_train", float('nan'))
+pearson_dt = metrics.get("DecisionTree", {}).get("pearson_train", float('nan'))
 pearson_nb = metrics.get("GaussianNB", {}).get("pearson_train", float('nan'))
 
-mae_rf = metrics.get("RandomForestClassifier", {}).get("mae_test", float('nan'))
-mae_dt = metrics.get("DecisionTreeClassifier", {}).get("mae_test", float('nan'))
+mae_rf = metrics.get("RandomForest", {}).get("mae_test", float('nan'))
+mae_dt = metrics.get("DecisionTree", {}).get("mae_test", float('nan'))
 mae_nb = metrics.get("GaussianNB", {}).get("mae_test", float('nan'))
 
 print("GENIS\t" + "\t".join(fmt(x) for x in [pearson_rf, pearson_dt, pearson_nb, mae_rf, mae_dt, mae_nb]))
@@ -514,8 +514,8 @@ feat_hdr = ["Feature\t", "RF", "DT", "NB"]
 print("\t".join(feat_hdr))
 feature_names = ["O-score ", "G-scoreP", "G-scoreM", "G-scoreN"]
 for idx, fname in enumerate(feature_names):
-    rf_val = metrics.get("RandomForestClassifier", {}).get("feature_importance")
-    dt_val = metrics.get("DecisionTreeClassifier", {}).get("feature_importance")
+    rf_val = metrics.get("RandomForest", {}).get("feature_importance")
+    dt_val = metrics.get("DecisionTree", {}).get("feature_importance")
     nb_val = metrics.get("GaussianNB", {}).get("feature_importance")
     rf_str = f"{rf_val[idx]:.3f}" if rf_val and len(rf_val) > idx else "n/a"
     dt_str = f"{dt_val[idx]:.3f}" if dt_val and len(dt_val) > idx else "n/a"
@@ -550,7 +550,7 @@ if args.image:
     plt.figure(figsize=(15, 8))
 
     # GENIS confusion matrices (RF, DT, NB)
-    for i, mname in enumerate(["RandomForestClassifier", "DecisionTreeClassifier", "GaussianNB"], start=1):
+    for i, mname in enumerate(["RandomForest", "DecisionTree", "GaussianNB"], start=1):
         plt.subplot(2, 3, i)
         preds = predictions_test.get(mname, [])
         preds_fmt = []
