@@ -125,7 +125,7 @@ def process_grade(
         return rawReview, grade, state
 
 def main():
-    ver: str = "0.14.0"
+    ver: str = "0.14.1"
     # Labels for the text and rating in the jsonl file
     # The default values are the ones used in the Amazon reviews dataset
     label_text: str = "text"
@@ -237,7 +237,7 @@ data
             # split sentences on hard punctuation (periods, exclamation marks, question marks)
             pairs: list[tuple[str, str]] = []
             nouns: list[str] = []
-            pairs, nouns = genisCore(rawReview, preprocessor, nlp)
+            pairs, nouns = genisCore(rawReviewData["corrected"], preprocessor, nlp)
 
         # Add the pairs to the review_dict for later sentiment analysis.
         # Differently, the review_dict uses the corrected review text as the key.
