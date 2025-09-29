@@ -271,12 +271,11 @@ X_test = [
     ]
 Y_train = [data["Y"] for data in DataDict_train]
 Y_test = [data["Y"] for data in DataDict_test]
-V_scores = [data["V-converted"] for data in DataDict.values()]
+# Prepare baseline scores/labels using the test split (so baselines are comparable to model test preds)
 V_scores = [data["V-converted"] for data in DataDict_test]
 V_labels = [str(v) for v in V_scores]
-LLM_scores = [data["LLM-score"] for data in DataDict.values()]
 LLM_scores = [data["LLM-score"] for data in DataDict_test]
-LLM_labels = [ str(l) for l in LLM_scores]  # Adjust LLM scores to match the labels
+LLM_labels = [str(l) for l in LLM_scores]
 
 modelRF = RandomForestClassifier(
     n_estimators=128,
@@ -434,14 +433,14 @@ def get_f1(model_name, which, idx):
 # Train row
 train_row = [
     "Train",
-    get_f1("RandomForest", "f1_train", 0),
-    get_f1("DecisionTree", "f1_train", 0),
+    get_f1("RandomForestClassifier", "f1_train", 0),
+    get_f1("DecisionTreeClassifier", "f1_train", 0),
     get_f1("GaussianNB", "f1_train", 0),
-    get_f1("RandomForest", "f1_train", 1),
-    get_f1("DecisionTree", "f1_train", 1),
+    get_f1("RandomForestClassifier", "f1_train", 1),
+    get_f1("DecisionTreeClassifier", "f1_train", 1),
     get_f1("GaussianNB", "f1_train", 1),
-    get_f1("RandomForest", "f1_train", 2),
-    get_f1("DecisionTree", "f1_train", 2),
+    get_f1("RandomForestClassifier", "f1_train", 2),
+    get_f1("DecisionTreeClassifier", "f1_train", 2),
     get_f1("GaussianNB", "f1_train", 2),
 ]
 print("\t".join(train_row))
@@ -449,30 +448,40 @@ print("\t".join(train_row))
 # Test row
 test_row = [
     "Test",
-    get_f1("RandomForest", "f1_test", 0),
-    get_f1("DecisionTree", "f1_test", 0),
+    get_f1("RandomForestClassifier", "f1_test", 0),
+    get_f1("DecisionTreeClassifier", "f1_test", 0),
     get_f1("GaussianNB", "f1_test", 0),
-    get_f1("RandomForest", "f1_test", 1),
-    get_f1("DecisionTree", "f1_test", 1),
+    get_f1("RandomForestClassifier", "f1_test", 1),
+    get_f1("DecisionTreeClassifier", "f1_test", 1),
     get_f1("GaussianNB", "f1_test", 1),
-    get_f1("RandomForest", "f1_test", 2),
-    get_f1("DecisionTree", "f1_test", 2),
+    get_f1("RandomForestClassifier", "f1_test", 2),
+    get_f1("DecisionTreeClassifier", "f1_test", 2),
     get_f1("GaussianNB", "f1_test", 2),
 ]
 print("\t".join(test_row))
 
-# Baseline rows (same values repeated across classifier columns for easy comparison)
+# Baseline rows: compute weighted, micro and macro F1 separately for VADER and LLM
 try:
-    vader_f1 = f1_score(Y_test, V_labels, average='weighted')
+    vader_f1_w = f1_score(Y_test, V_labels, average='weighted')
+    vader_f1_m = f1_score(Y_test, V_labels, average='micro')
+    vader_f1_M = f1_score(Y_test, V_labels, average='macro')
 except Exception:
-    vader_f1 = float('nan')
+    vader_f1_w = vader_f1_m = vader_f1_M = float('nan')
 try:
-    llm_f1 = f1_score(Y_test, LLM_labels, average='weighted')
+    llm_f1_w = f1_score(Y_test, LLM_labels, average='weighted')
+    llm_f1_m = f1_score(Y_test, LLM_labels, average='micro')
+    llm_f1_M = f1_score(Y_test, LLM_labels, average='macro')
 except Exception:
-    llm_f1 = float('nan')
+    llm_f1_w = llm_f1_m = llm_f1_M = float('nan')
 
-vader_row = ["VADER"] + [fmt(vader_f1)]*3 + [fmt(vader_f1)]*3 + [fmt(vader_f1)]*3
-llm_row = ["LLM"] + [fmt(llm_f1)]*3 + [fmt(llm_f1)]*3 + [fmt(llm_f1)]*3
+vader_row = ["VADER",
+             fmt(vader_f1_w), fmt(vader_f1_w), fmt(vader_f1_w),
+             fmt(vader_f1_m), fmt(vader_f1_m), fmt(vader_f1_m),
+             fmt(vader_f1_M), fmt(vader_f1_M), fmt(vader_f1_M)]
+llm_row = ["LLM",
+           fmt(llm_f1_w), fmt(llm_f1_w), fmt(llm_f1_w),
+           fmt(llm_f1_m), fmt(llm_f1_m), fmt(llm_f1_m),
+           fmt(llm_f1_M), fmt(llm_f1_M), fmt(llm_f1_M)]
 print("\t".join(vader_row))
 print("\t".join(llm_row))
 
@@ -481,12 +490,12 @@ print("\nNumerical domain - Pearson (train) and MAE (test)")
 hdr2 = ["Set", "PearRF", "PearDT", "PearNB", "MAE_RF", "MAE_DT", "MAE_NB"]
 print("\t".join(hdr2))
 
-pearson_rf = metrics.get("RandomForest", {}).get("pearson_train", float('nan'))
-pearson_dt = metrics.get("DecisionTree", {}).get("pearson_train", float('nan'))
+pearson_rf = metrics.get("RandomForestClassifier", {}).get("pearson_train", float('nan'))
+pearson_dt = metrics.get("DecisionTreeClassifier", {}).get("pearson_train", float('nan'))
 pearson_nb = metrics.get("GaussianNB", {}).get("pearson_train", float('nan'))
 
-mae_rf = metrics.get("RandomForest", {}).get("mae_test", float('nan'))
-mae_dt = metrics.get("DecisionTree", {}).get("mae_test", float('nan'))
+mae_rf = metrics.get("RandomForestClassifier", {}).get("mae_test", float('nan'))
+mae_dt = metrics.get("DecisionTreeClassifier", {}).get("mae_test", float('nan'))
 mae_nb = metrics.get("GaussianNB", {}).get("mae_test", float('nan'))
 
 print("GENIS\t" + "\t".join(fmt(x) for x in [pearson_rf, pearson_dt, pearson_nb, mae_rf, mae_dt, mae_nb]))
@@ -514,8 +523,8 @@ feat_hdr = ["Feature\t", "RF", "DT", "NB"]
 print("\t".join(feat_hdr))
 feature_names = ["O-score ", "G-scoreP", "G-scoreM", "G-scoreN"]
 for idx, fname in enumerate(feature_names):
-    rf_val = metrics.get("RandomForest", {}).get("feature_importance")
-    dt_val = metrics.get("DecisionTree", {}).get("feature_importance")
+    rf_val = metrics.get("RandomForestClassifier", {}).get("feature_importance")
+    dt_val = metrics.get("DecisionTreeClassifier", {}).get("feature_importance")
     nb_val = metrics.get("GaussianNB", {}).get("feature_importance")
     rf_str = f"{rf_val[idx]:.3f}" if rf_val and len(rf_val) > idx else "n/a"
     dt_str = f"{dt_val[idx]:.3f}" if dt_val and len(dt_val) > idx else "n/a"
@@ -550,7 +559,7 @@ if args.image:
     plt.figure(figsize=(15, 8))
 
     # GENIS confusion matrices (RF, DT, NB)
-    for i, mname in enumerate(["RandomForest", "DecisionTree", "GaussianNB"], start=1):
+    for i, mname in enumerate(["RandomForestClassifier", "DecisionTreeClassifier", "GaussianNB"], start=1):
         plt.subplot(2, 3, i)
         preds = predictions_test.get(mname, [])
         preds_fmt = []
