@@ -6,13 +6,14 @@ import argparse
 import csv
 import random
 import concurrent.futures
+from typing import Optional, Any, cast
 
 from preprocessing import ReviewPreprocessor
 from sentiments import Sentiments
 from genisCore import genisCore
 
 # Define the analyze_sentiment function
-def analyze_sentiment(pairs: tuple[str, str],sid = None) -> dict[str, dict]:
+def analyze_sentiment(pairs: list[tuple[str, str]], sid: SentimentIntensityAnalyzer | None = None) -> dict[tuple[str, str], dict]:
     """
     Analyze sentiment for a list of noun/adjective pairs using VADER.
     Args:
@@ -25,7 +26,7 @@ def analyze_sentiment(pairs: tuple[str, str],sid = None) -> dict[str, dict]:
     """
     if sid is None:
         sid = SentimentIntensityAnalyzer()
-    scores: dict[str, dict] = {}
+    scores: dict[tuple[str, str], dict] = {}
     for pair in pairs:
         # Each pair is a tuple (adj, noun)
         adj, noun = pair
@@ -125,7 +126,7 @@ def process_grade(
         return rawReview, grade, state
 
 def main():
-    ver: str = "0.14.1"
+    ver: str = "0.15.0"
     # Labels for the text and rating in the jsonl file
     # The default values are the ones used in the Amazon reviews dataset
     label_text: str = "text"
@@ -192,13 +193,15 @@ data
         file_path=reviewsFileName,
         max_reviews=args.max_reviews,
         label_text=label_text, label_rating=label_rating,
-        seed=seed, callback=cbDotPrint
+        seed=seed, callback=cast(Any, cbDotPrint)
     )
     print(f"\nLoaded {len(original_reviews)} reviews.")
 
     print("Preprocessing reviews...")
     # Build a dict mapping review text to its rating (this is useful for caching).
-    reviews_dict: dict[str, float] = {
+    # Use Any for the value type because we later replace float values with dicts
+    # containing multiple fields (readable, corrected, pairs, ...).
+    reviews_dict: dict[str, Any] = {
         str(review[label_text]): review[label_rating] for review in original_reviews
     }
     # Call the class method on the preprocessor instance.
@@ -212,10 +215,10 @@ data
     nouns: list[str] = []
     # The dictionary associates the original review with its corrected form and
     # the adjective-noun pairs.
-    reviews_dict: dict[tuple[str,str, str]] = {}
+    reviews_pairs_dict: dict[str, dict] = {}
     # The dictionary associates the original review with its corrected form and
     # the adjective-noun pairs which VADER considers relevant (abs(compound) >= 0.05).
-    filtered_reviews_dict: dict[str, list[dict]] = {}
+    filtered_reviews_dict: dict[str, dict] = {}
     # The dictionary associates a review with the sentiment scores that the LLM
     # calculated for each noun in filtered_reviews_dict(review).
     parsed_scores: dict[str, dict] = {}
@@ -259,6 +262,9 @@ data
             print(f"{index} of {len(reviews_dict)}")
         index += 1
 
+        filtered_pairs: list[tuple[str, str, dict]] = []
+        W_whole: dict[str, float] = {}
+
         cachedReview = preprocessor.GetReviewFromCache(rawReview)
         if cachedReview is not None:
             if "pairs" in cachedReview:
@@ -270,7 +276,6 @@ data
                 else:
                     continue
             else:
-                filtered_pairs: list[tuple[str, str, dict]] = []
                 pairs = rawReviewData["pairs"]
                 # Calculate the sentiment scores for the pairs, then filter out
                 # those with a compound score below 0.05
@@ -375,9 +380,9 @@ data
     # Human scores must be added manually, so there is the risk of overwriting the file
     # if it already exists. The user is prompted to overwrite the file or not.
 
-    # Select up to 100 reviews
     num_reviews_to_select: int = min(100, len(filtered_reviews_dict))
-    writer: None
+    writer: Optional[csv.DictWriter] = None
+    fieldnames: list[str] = ['readable','hscore','review']
     fieldnames: list[str] = ['readable','hscore','review']
 
     random.seed(seed)
