@@ -1,10 +1,12 @@
 Valid up to versions:
-genisCalc   0.14.0
+genisCalc   0.14.1
 genisTrain  0.15.0
 
 # CHANGELOG
 
-0.15.0: genisCalc now can process and compare multiple classifiers. Changes to comply with reviewers' requests.
+0.15.0 (genisTrain): can process and compare multiple classifiers. Changes to comply with reviewers' requests.
+
+0.14.1 (genisCalc): solved a cache bug.
 
 0.14.0: Libraries updates
 
