@@ -116,6 +116,11 @@ You can get acquainted with genisCalc and use it as you prefer. If you want to r
   The script works only if you executed genisCalc with the default seed.
 
   6) now you can run genisTrain and check the results. See below the relevant section on how to execute genisCalc.
+  Be careful: the order you specify the data files in genisCalc is relevant, because they are packed in the same sequence and then split in training and test sets. Changing the file order modifies the samples in both.
+
+  To get the experimental results, please use:
+
+    python.exe .\genisTrain.py Digital_Music magazine_subscriptions musical_instruments patio_lawn_and_garden software
 
 ### command line parameters
 
