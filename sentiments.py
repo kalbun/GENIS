@@ -33,6 +33,7 @@ class Sentiments:
         response: str = ""
         success: bool = False
         model: str = "mistral-small-latest"
+        model = "mistral-small-2503"
         retry_counter: int = 0
         while retry_counter < attempts:
             try:
