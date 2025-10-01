@@ -284,21 +284,25 @@ modelRF = RandomForestClassifier(
     max_leaf_nodes=15,
     random_state=args.seed)
 
-modelDT = DecisionTreeClassifier(
-    criterion='gini',
-    max_depth=10,
+modelRF = RandomForestClassifier(
+    n_estimators=48,
+    criterion='log_loss',
+    max_depth=None,
+    max_leaf_nodes=10,
     min_samples_split=2,
-    max_leaf_nodes=20,
     min_samples_leaf=1,
+    random_state=args.seed)
+
+modelDT = DecisionTreeClassifier(
     random_state=args.seed)
 
 modelNB = GaussianNB()
 
-"""
-# Random forest calibration
 
+# Random forest calibration
+"""
 from sklearn.model_selection import cross_val_score, KFold, GridSearchCV
-from sklearn.ensemble import RandomForest
+from sklearn.ensemble import RandomForestClassifier
 import numpy as np
 
 
@@ -314,12 +318,13 @@ param_grid = {
     'criterion': ['gini','log_loss'],
     'max_depth': [None, 10, 20],
     'min_samples_split': [2, 4],
-    'max_leaf_nodes': [None, 15, 20, 25],
+    'max_leaf_nodes': [None, 10, 15, 20, 25],
     'min_samples_leaf': [1, 2],
+    'random_state': [args.seed]
 }
 
 # Initialize GridSearchCV
-grid_search = GridSearchCV(estimator=model, param_grid=param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+grid_search = GridSearchCV(estimator=modelRF, param_grid=param_grid, cv=5, scoring='accuracy', n_jobs=-1)
 
 # Perform grid search
 grid_search.fit(X, y)
@@ -530,6 +535,23 @@ for idx, fname in enumerate(feature_names):
     dt_str = f"{dt_val[idx]:.3f}" if dt_val and len(dt_val) > idx else "n/a"
     nb_str = f"{nb_val[idx]:.3f}" if nb_val and len(nb_val) > idx else "n/a"
     print("\t".join([fname, rf_str, dt_str, nb_str]))
+
+# Plot charts with distribution of votes for each model
+def plot_vote_distribution(model_name, scores):
+    plt.figure(figsize=(8, 5))
+    plt.hist([float(s) for s in scores], bins=20, color='blue', alpha=0.7)
+    plt.title(f"Vote Distribution for {model_name}")
+    plt.xlabel("Predicted Score")
+    plt.ylabel("Frequency")
+    plt.grid(axis='y', alpha=0.75)
+    plt.show()
+
+#for model_name, scores in predictions_test.items():
+#    plot_vote_distribution(model_name, scores)
+
+# also plot LLM distribution
+plot_vote_distribution("LLM", LLM_scores)
+plot_vote_distribution("Human", Y_test)
 
 # Confusion matrices: three GENIS matrices (RF, DT, NB) + LLM + VADER
 if args.image:
