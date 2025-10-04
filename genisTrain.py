@@ -284,25 +284,21 @@ modelRF = RandomForestClassifier(
     max_leaf_nodes=15,
     random_state=args.seed)
 
-modelRF = RandomForestClassifier(
-    n_estimators=48,
-    criterion='log_loss',
-    max_depth=None,
-    max_leaf_nodes=10,
-    min_samples_split=2,
-    min_samples_leaf=1,
-    random_state=args.seed)
-
 modelDT = DecisionTreeClassifier(
+    criterion='gini',
+    max_depth=10,
+    min_samples_split=2,
+    max_leaf_nodes=20,
+    min_samples_leaf=1,
     random_state=args.seed)
 
 modelNB = GaussianNB()
 
-
-# Random forest calibration
 """
+# Random forest calibration
+
 from sklearn.model_selection import cross_val_score, KFold, GridSearchCV
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForest
 import numpy as np
 
 
@@ -318,13 +314,12 @@ param_grid = {
     'criterion': ['gini','log_loss'],
     'max_depth': [None, 10, 20],
     'min_samples_split': [2, 4],
-    'max_leaf_nodes': [None, 10, 15, 20, 25],
+    'max_leaf_nodes': [None, 15, 20, 25],
     'min_samples_leaf': [1, 2],
-    'random_state': [args.seed]
 }
 
 # Initialize GridSearchCV
-grid_search = GridSearchCV(estimator=modelRF, param_grid=param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+grid_search = GridSearchCV(estimator=model, param_grid=param_grid, cv=5, scoring='accuracy', n_jobs=-1)
 
 # Perform grid search
 grid_search.fit(X, y)
@@ -536,23 +531,6 @@ for idx, fname in enumerate(feature_names):
     nb_str = f"{nb_val[idx]:.3f}" if nb_val and len(nb_val) > idx else "n/a"
     print("\t".join([fname, rf_str, dt_str, nb_str]))
 
-# Plot charts with distribution of votes for each model
-def plot_vote_distribution(model_name, scores):
-    plt.figure(figsize=(8, 5))
-    plt.hist([float(s) for s in scores], bins=20, color='blue', alpha=0.7)
-    plt.title(f"Vote Distribution for {model_name}")
-    plt.xlabel("Predicted Score")
-    plt.ylabel("Frequency")
-    plt.grid(axis='y', alpha=0.75)
-    plt.show()
-
-#for model_name, scores in predictions_test.items():
-#    plot_vote_distribution(model_name, scores)
-
-# also plot LLM distribution
-plot_vote_distribution("LLM", LLM_scores)
-plot_vote_distribution("Human", Y_test)
-
 # Confusion matrices: three GENIS matrices (RF, DT, NB) + LLM + VADER
 if args.image:
     # prepare label set from numeric sources and produce ordered label strings
@@ -580,27 +558,26 @@ if args.image:
     Y_test_fmt = [f"{float(y):.1f}" for y in Y_test]
     plt.figure(figsize=(15, 8))
 
-    # GENIS confusion matrices (RF, DT, NB)
-    for i, mname in enumerate(["RandomForestClassifier", "DecisionTreeClassifier", "GaussianNB"], start=1):
-        plt.subplot(2, 3, i)
-        preds = predictions_test.get(mname, [])
-        preds_fmt = []
-        for p in preds:
-            try:
-                preds_fmt.append(f"{float(p):.1f}")
-            except Exception:
-                preds_fmt.append(str(p))
-        plotConfusionMatrix(
-            y_true=Y_test_fmt,
-            y_pred=preds_fmt,
-            labels=ordered_labels,
-            title=f"GENIS ({mname})",
-            xlabel="GENIS",
-            ylabel="Human"
-        )
+    # GENIS confusion matrix for RandomForestClassifier
+    plt.subplot(2, 3, 1)
+    preds = predictions_test.get("RandomForestClassifier", [])
+    preds_fmt = []
+    for p in preds:
+        try:
+            preds_fmt.append(f"{float(p):.1f}")
+        except Exception:
+            preds_fmt.append(str(p))
+    plotConfusionMatrix(
+        y_true=Y_test_fmt,
+        y_pred=preds_fmt,
+        labels=ordered_labels,
+        title=f"GENIS (RandomForestClassifier)",
+        xlabel="GENIS",
+        ylabel="Human"
+    )
 
     # LLM
-    plt.subplot(2, 3, 4)
+    plt.subplot(2, 3, 2)
     LLM_fmt = []
     for l in LLM_scores:
         try:
@@ -617,7 +594,7 @@ if args.image:
     )
 
     # VADER
-    plt.subplot(2, 3, 5)
+    plt.subplot(2, 3, 3)
     V_fmt = []
     for v in V_scores:
         try:
@@ -632,6 +609,24 @@ if args.image:
         xlabel="VADER",
         ylabel="Human"
     )
+
+    for i, mname in enumerate(["DecisionTreeClassifier", "GaussianNB"], start=4):
+        plt.subplot(2, 3, i)
+        preds = predictions_test.get(mname, [])
+        preds_fmt = []
+        for p in preds:
+            try:
+                preds_fmt.append(f"{float(p):.1f}")
+            except Exception:
+                preds_fmt.append(str(p))
+        plotConfusionMatrix(
+            y_true=Y_test_fmt,
+            y_pred=preds_fmt,
+            labels=ordered_labels,
+            title=f"GENIS ({mname})",
+            xlabel="GENIS",
+            ylabel="Human"
+        )
 
     plt.subplot(2, 3, 6)
     plt.axis('off')
