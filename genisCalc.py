@@ -6,12 +6,14 @@ import argparse
 import csv
 import random
 import concurrent.futures
+from typing import Optional, Any, cast
 
 from preprocessing import ReviewPreprocessor
 from sentiments import Sentiments
+from genisCore import genisCore
 
 # Define the analyze_sentiment function
-def analyze_sentiment(pairs: tuple[str, str],sid = None) -> dict[str, dict]:
+def analyze_sentiment(pairs: list[tuple[str, str]], sid: SentimentIntensityAnalyzer | None = None) -> dict[tuple[str, str], dict]:
     """
     Analyze sentiment for a list of noun/adjective pairs using VADER.
     Args:
@@ -24,7 +26,7 @@ def analyze_sentiment(pairs: tuple[str, str],sid = None) -> dict[str, dict]:
     """
     if sid is None:
         sid = SentimentIntensityAnalyzer()
-    scores: dict[str, dict] = {}
+    scores: dict[tuple[str, str], dict] = {}
     for pair in pairs:
         # Each pair is a tuple (adj, noun)
         adj, noun = pair
@@ -124,7 +126,7 @@ def process_grade(
         return rawReview, grade, state
 
 def main():
-    ver: str = "0.13.0"
+    ver: str = "0.15.0"
     # Labels for the text and rating in the jsonl file
     # The default values are the ones used in the Amazon reviews dataset
     label_text: str = "text"
@@ -132,8 +134,8 @@ def main():
 
     # Create an instance of classes used in the script.
     # Initialization postponed as it requires the cache path, calculated later.
-    sentimentsManager: Sentiments = None
-    preprocessor: ReviewPreprocessor = None
+    sentimentsManager: Sentiments
+    preprocessor: ReviewPreprocessor
 
     print(f"GENIS calc v{ver}")
     parser = argparse.ArgumentParser()
@@ -191,13 +193,15 @@ data
         file_path=reviewsFileName,
         max_reviews=args.max_reviews,
         label_text=label_text, label_rating=label_rating,
-        seed=seed, callback=cbDotPrint
+        seed=seed, callback=cast(Any, cbDotPrint)
     )
     print(f"\nLoaded {len(original_reviews)} reviews.")
 
     print("Preprocessing reviews...")
     # Build a dict mapping review text to its rating (this is useful for caching).
-    reviews_dict: dict[str, float] = {
+    # Use Any for the value type because we later replace float values with dicts
+    # containing multiple fields (readable, corrected, pairs, ...).
+    reviews_dict: dict[str, Any] = {
         str(review[label_text]): review[label_rating] for review in original_reviews
     }
     # Call the class method on the preprocessor instance.
@@ -211,10 +215,10 @@ data
     nouns: list[str] = []
     # The dictionary associates the original review with its corrected form and
     # the adjective-noun pairs.
-    reviews_dict: dict[tuple[str,str, str]] = {}
+    reviews_pairs_dict: dict[str, dict] = {}
     # The dictionary associates the original review with its corrected form and
     # the adjective-noun pairs which VADER considers relevant (abs(compound) >= 0.05).
-    filtered_reviews_dict: dict[str, list[dict]] = {}
+    filtered_reviews_dict: dict[str, dict] = {}
     # The dictionary associates a review with the sentiment scores that the LLM
     # calculated for each noun in filtered_reviews_dict(review).
     parsed_scores: dict[str, dict] = {}
@@ -231,50 +235,12 @@ data
 #        if cachedReview is not None and ("pairs" in cachedReview) and ("nouns" in cachedReview):
         if cachedReview is not None and ("pairs" in cachedReview):
             pass
-        else:
+        else:        
             # If not, process the review to extract adjective-noun pairs.
             # split sentences on hard punctuation (periods, exclamation marks, question marks)
-            pairs = []
-            nouns = []
-            # This regex splits on periods, exclamation marks, and question marks,
-            sentences = re.split(r'(?<=[.!?]) +', rawReviewData["corrected"])
-            for sentence in sentences:
-                sentence = sentence.strip()
-                if len(sentence) < 4:
-                    continue
-                # Process the sentence with SpaCy.
-                # This is the core idea of the method: we assume that the sentiment in a review
-                # is mainly expressed by nouns combined with adjectives, like in "good music"
-                # or "awful service"
-                # The extraction uses Spacy.
-                # - "amod" means adjectival modifier (e.g., "good" in "good music")
-                # - "acomp" means adjectival complement (e.g., "good" in "the product is good")
-                # - "nsubj" means nominal subject (e.g., "product" in "the product is good") 
-                doc = nlp(sentence)
-                for token in doc:
-                    if token.pos_ == "NOUN":
-                        # Token "children" are the words that depend on it.
-                        for child in token.children:
-                            if child.dep_ == "amod":
-                                # adjective modifier (e.g., "good" in "good music")
-                                pairs.append((token.text, child.text))
-                                nouns.append(token.text)
-                    elif token.dep_ == "acomp":
-                        # adjectival complement (e.g., "good" in "the product is good").
-                        # Now search its subject (the noun).
-                        subjects = [child for child in token.head.children if child.dep_ == "nsubj"]
-                        if subjects:
-                            # Found, we can add the pair
-                            pairs.append((subjects[0].text, token.text))
-                            nouns.append(subjects[0].text)
-
-            # Lemmatization is useful for cases where singual and plural forms are used
-            # interchangeably, like "good music" and "good musics".
-            pairs = [(preprocessor.LemmatizeText(noun), adj) for noun, adj in pairs]
-            # Remove duplicates from pairs
-            pairs = sorted(list(set(pairs)))
-            # Recalculate the nouns based on the pairs
-            nouns = sorted(list(set([noun for noun, _ in pairs])))
+            pairs: list[tuple[str, str]] = []
+            nouns: list[str] = []
+            pairs, nouns = genisCore(rawReviewData["corrected"], preprocessor, nlp)
 
         # Add the pairs to the review_dict for later sentiment analysis.
         # Differently, the review_dict uses the corrected review text as the key.
@@ -296,6 +262,9 @@ data
             print(f"{index} of {len(reviews_dict)}")
         index += 1
 
+        filtered_pairs: list[tuple[str, str, dict]] = []
+        W_whole: dict[str, float] = {}
+
         cachedReview = preprocessor.GetReviewFromCache(rawReview)
         if cachedReview is not None:
             if "pairs" in cachedReview:
@@ -307,7 +276,6 @@ data
                 else:
                     continue
             else:
-                filtered_pairs: list[tuple[str, str, dict]] = []
                 pairs = rawReviewData["pairs"]
                 # Calculate the sentiment scores for the pairs, then filter out
                 # those with a compound score below 0.05
@@ -370,10 +338,10 @@ data
         index = 0
         for future in concurrent.futures.as_completed(futures):
             rawReview, parsed_scores, state = future.result()
-            print(f"{state}", end="")
+            print(f"{state}", end="", flush=True)
             index += 1
             if (index % 100) == 0:
-                print(f" {index} of {len(filtered_reviews_dict)}")
+                print(f" {index} of {len(filtered_reviews_dict)}", flush=True)
             if state == "E" or state == "J":
                 # If there was an error, there is nothing to do.
                 continue
@@ -400,9 +368,9 @@ data
         for future in concurrent.futures.as_completed(futures_grade):
             rawReview, grade, state = future.result()
             index += 1
-            print(f"{state}", end="")
+            print(f"{state}", end="", flush=True)
             if (index % 100) == 0:
-                print(f" {index} of {len(filtered_reviews_dict)}")
+                print(f" {index} of {len(filtered_reviews_dict)}", flush=True)
             if state == "E":
                 grade = 0
             filtered_reviews_dict[rawReview]["LLM-score"] = grade
@@ -412,9 +380,9 @@ data
     # Human scores must be added manually, so there is the risk of overwriting the file
     # if it already exists. The user is prompted to overwrite the file or not.
 
-    # Select up to 100 reviews
     num_reviews_to_select: int = min(100, len(filtered_reviews_dict))
-    writer: None
+    writer: Optional[csv.DictWriter] = None
+    fieldnames: list[str] = ['readable','hscore','review']
     fieldnames: list[str] = ['readable','hscore','review']
 
     random.seed(seed)

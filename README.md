@@ -1,8 +1,14 @@
 Valid up to versions:
-genisCalc   0.13.0
-genisTrain  0.13.0
+genisCalc   0.15.0
+genisTrain  0.15.0
 
 # CHANGELOG
+
+0.15.0 genisTrain can process and compare multiple classifiers. Changes to comply with reviewers' requests.
+
+0.14.1 (genisCalc): solved a cache bug.
+
+0.14.0: Libraries updates
 
 0.13.0: Added instructions for reproducing experiment results.
 
@@ -82,18 +88,17 @@ You can use different LLMs, but you will need to manually modify the code in sen
 You can get acquainted with genisCalc and use it as you prefer. If you want to reproduce the results we achieved, there are a few more steps to execute:
 
 1) from https://amazon-reviews-2023.github.io/ download these review files:
-
   https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw/review_categories/Digital_Music.jsonl.gz
   https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw/review_categories/Magazine_Subscriptions.jsonl.gz
   https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw/review_categories/Musical_Instruments.jsonl.gz
   https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw/review_categories/Patio_Lawn_and_Garden.jsonl.gz
   https://mcauleylab.ucsd.edu/public_datasets/data/amazon_2023/raw/review_categories/Software.jsonl.gz
 
-  2) move them in the directory where genisCalc is located and unzip them. Ensure that the five json files are locaed in the same directory of genisCalc.
+  2) unzip the files, then move the *.json in the subdirectory data of GENIS (please create it if not existing).
 
-  3) run genisCalc on each of the five files. This will take a LONG time because the script must clean the reviews and invoke the LLM. After the first run, data are cached and the operation becomes much faster.
+  3) run genisCalc on each of the five files as indicated below in "command line parameters". This will take a LONG time because the script must clean the reviews and invoke the LLM. After the first run, data are cached and the operation becomes much faster.
 
-  4) at the end of this operation, you will find five subdirectories under the directory data.
+  4) at the end of this operation, you will find five subdirectories under the directory data, named after each of the five files.
   IMPORTANT: unfortunately, there could be temporary issues with Mistral that make the sentiment evaluation fail. You can note it when, during the two phases of LLM calculation, you see one of more error symbols 'E' like this:
 
     Calculating LLM scores for the reviews.
@@ -111,6 +116,11 @@ You can get acquainted with genisCalc and use it as you prefer. If you want to r
   The script works only if you executed genisCalc with the default seed.
 
   6) now you can run genisTrain and check the results. See below the relevant section on how to execute genisCalc.
+  Be careful: the order you specify the data files in genisCalc is relevant, because they are packed in the same sequence and then split in training and test sets. Changing the file order modifies the samples in both.
+
+  To get the experimental results, please use:
+
+    python.exe .\genisTrain.py Digital_Music magazine_subscriptions musical_instruments patio_lawn_and_garden software
 
 ### command line parameters
 
@@ -197,9 +207,10 @@ Once the manual grading is completed, you can invoke genisTrain. This will:
 - save the classifier in a simple pickle file for later usage
 - get preliminary metrics.
 
-genisTrain receives three parameters:
+genisTrain can receive these parameters:
 
 List of space-separated directories:
+  Mandatory parameter.
   names of directories where genisCalc stored its data. For example, if you processed rubberducks.jsonl and lightsabers.json, then invoke genisTrain this way:
 
     python.exe genisTrain.py rubberducks lightsabers
@@ -208,7 +219,6 @@ List of space-separated directories:
 
 -s SEED:
   Allows to set the seed for the random generator. The default is 1967.
-  Specify the same seed used for genisCalc.
 
 -l FILE:
   When genisTrain is loaded with a list of paths, it consolidates all the data in one single file called overall_results.csv. With this parameter, it is possible to skip the consolidation process and directly read that file. This flag has priority over the list of paths.
@@ -218,10 +228,12 @@ List of space-separated directories:
 
 ### genisTrain output files
 
-genisTrain will produce two files:
+Since release 0.15, genisTrain can compare different classifiers, generating a pair of files for each of them.
 
-    data/overall_results containing the consolidated data in csv (see DATA STORAGE)
-    data/random_forest_classifier.pkl, the serialized dump of the classifier in pickle format.
+If <classifier> is the name of a classifier, then genisTrain produces:
+
+    data/<classifier>_overall_results with the consolidated data in csv (see DATA STORAGE)
+    data/<classifier>.pkl with a serialized dump of the classifier in pickle format. This file is useful to load the model without recalculating it.
 
 # Where to find reviews?
 
